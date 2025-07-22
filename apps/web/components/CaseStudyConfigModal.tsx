@@ -248,7 +248,7 @@ export function CaseStudyConfigModal({
 
             <RadioGroup
               value={localConfig.model_name}
-              onValueChange={(value) => setLocalConfig(prev => ({ 
+              onValueChange={(value: string) => setLocalConfig(prev => ({ 
                 ...prev, 
                 model_name: value as GenerationConfig['model_name']
               }))}
@@ -309,7 +309,7 @@ export function CaseStudyConfigModal({
 
             <RadioGroup
               value={localConfig.template_type}
-              onValueChange={(value) => setLocalConfig(prev => ({ 
+              onValueChange={(value: string) => setLocalConfig(prev => ({ 
                 ...prev, 
                 template_type: value as GenerationConfig['template_type']
               }))}
