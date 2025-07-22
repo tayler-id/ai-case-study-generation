@@ -260,3 +260,248 @@ async def logout(response: Response):
     response.delete_cookie(key="access_token", httponly=True, samesite="lax")
     response.delete_cookie(key="user_data", samesite="lax")
     return {"message": "Logged out successfully"}
+
+# ==== CONNECTION MANAGEMENT ENDPOINTS ====
+
+def get_current_user_from_token(request: Request, session: Session) -> User:
+    """Helper function to get current user from JWT token"""
+    token = get_token_from_cookies(request)
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+    
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    
+    user_repo = UserRepository(session)
+    user = user_repo.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return user
+
+@router.get("/connections/status")
+async def get_connections_status(request: Request, session: Session = Depends(get_session)):
+    """Get connection status for Gmail and Drive services"""
+    try:
+        user = get_current_user_from_token(request, session)
+        
+        # Helper function to determine connection status
+        def get_service_status(connected: bool, expired: bool) -> str:
+            if not connected:
+                return "disconnected"
+            elif expired:
+                return "expired" 
+            else:
+                return "connected"
+        
+        connections = [
+            {
+                "service": "gmail",
+                "status": get_service_status(user.is_gmail_connected, user.gmail_token_expired),
+                "connectedAt": user.gmail_connected_at.isoformat() if user.gmail_connected_at else None,
+                "expiresAt": user.gmail_token_expires_at.isoformat() if user.gmail_token_expires_at else None
+            },
+            {
+                "service": "drive", 
+                "status": get_service_status(user.is_drive_connected, user.drive_token_expired),
+                "connectedAt": user.drive_connected_at.isoformat() if user.drive_connected_at else None,
+                "expiresAt": user.drive_token_expires_at.isoformat() if user.drive_token_expires_at else None
+            }
+        ]
+        
+        return {
+            "userId": str(user.id),
+            "connections": connections,
+            "lastUpdated": datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get connection status: {str(e)}")
+
+@router.post("/connections/{service}/grant")
+async def grant_service_permission(
+    service: str, 
+    request: Request, 
+    session: Session = Depends(get_session)
+):
+    """Initiate permission granting for Gmail or Drive service"""
+    try:
+        # Validate service parameter
+        if service not in ["gmail", "drive"]:
+            raise HTTPException(status_code=400, detail="Invalid service. Must be 'gmail' or 'drive'")
+        
+        user = get_current_user_from_token(request, session)
+        
+        # Create OAuth flow with incremental authorization
+        flow = create_oauth_flow()
+        
+        # Determine scopes based on service
+        if service == "gmail":
+            service_scopes = [
+                "https://www.googleapis.com/auth/userinfo.email",
+                "https://www.googleapis.com/auth/userinfo.profile",
+                "openid",
+                "https://www.googleapis.com/auth/gmail.readonly"
+            ]
+        else:  # drive
+            service_scopes = [
+                "https://www.googleapis.com/auth/userinfo.email", 
+                "https://www.googleapis.com/auth/userinfo.profile",
+                "openid",
+                "https://www.googleapis.com/auth/drive.readonly"
+            ]
+        
+        # Override scopes for this specific service
+        flow.scope = service_scopes
+        
+        # Generate authorization URL with service-specific state
+        auth_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent',
+            state=f"{service}_{user.id}"  # Include service and user ID in state
+        )
+        
+        return {
+            "service": service,
+            "authUrl": auth_url,
+            "state": state
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to initiate {service} permission grant: {str(e)}")
+
+@router.get("/connections/callback/{service}")
+async def service_connection_callback(
+    service: str,
+    request: Request, 
+    session: Session = Depends(get_session)
+):
+    """Handle OAuth callback for specific service connections"""
+    try:
+        # Validate service parameter
+        if service not in ["gmail", "drive"]:
+            raise HTTPException(status_code=400, detail="Invalid service. Must be 'gmail' or 'drive'")
+        
+        # Get the authorization code from the callback
+        auth_code = request.query_params.get('code')
+        state = request.query_params.get('state')
+        
+        if not auth_code:
+            raise HTTPException(status_code=400, detail="Authorization code not received")
+        
+        # Validate state parameter contains service and user info
+        if not state or not state.startswith(f"{service}_"):
+            raise HTTPException(status_code=400, detail="Invalid state parameter")
+        
+        # Extract user ID from state
+        try:
+            user_id = state.split(f"{service}_")[1]
+        except IndexError:
+            raise HTTPException(status_code=400, detail="Invalid state format")
+        
+        # Exchange authorization code for tokens
+        flow = create_oauth_flow()
+        flow.fetch_token(code=auth_code)
+        
+        credentials = flow.credentials
+        
+        # Get user from database
+        user_repo = UserRepository(session)
+        user = user_repo.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Store tokens based on service
+        now = datetime.utcnow()
+        expires_at = now + timedelta(seconds=credentials.expiry.timestamp() - now.timestamp()) if credentials.expiry else None
+        
+        if service == "gmail":
+            user.gmail_access_token = credentials.token  # TODO: Encrypt in production
+            user.gmail_refresh_token = credentials.refresh_token  # TODO: Encrypt in production  
+            user.gmail_token_expires_at = expires_at
+            user.gmail_connected_at = now
+        else:  # drive
+            user.drive_access_token = credentials.token  # TODO: Encrypt in production
+            user.drive_refresh_token = credentials.refresh_token  # TODO: Encrypt in production
+            user.drive_token_expires_at = expires_at  
+            user.drive_connected_at = now
+        
+        user.updated_at = now
+        
+        # Save updated user
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        
+        # Redirect back to frontend with success
+        success_url = f"{settings.cors_origins}?connection={service}&status=connected"
+        return RedirectResponse(url=success_url)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"Service connection error: {str(e)}")
+        print(traceback.format_exc())
+        
+        # Redirect to frontend with error
+        error_url = f"{settings.cors_origins}?connection={service}&status=error"
+        return RedirectResponse(url=error_url)
+
+@router.delete("/connections/{service}")
+async def disconnect_service(
+    service: str,
+    request: Request,
+    session: Session = Depends(get_session)
+):
+    """Disconnect a service by clearing stored tokens"""
+    try:
+        # Validate service parameter
+        if service not in ["gmail", "drive"]:
+            raise HTTPException(status_code=400, detail="Invalid service. Must be 'gmail' or 'drive'")
+        
+        user = get_current_user_from_token(request, session)
+        
+        # Clear tokens based on service
+        if service == "gmail":
+            user.gmail_access_token = None
+            user.gmail_refresh_token = None
+            user.gmail_token_expires_at = None
+            user.gmail_connected_at = None
+        else:  # drive  
+            user.drive_access_token = None
+            user.drive_refresh_token = None
+            user.drive_token_expires_at = None
+            user.drive_connected_at = None
+        
+        user.updated_at = datetime.utcnow()
+        
+        # Save updated user
+        session.add(user)
+        session.commit()
+        
+        return {
+            "message": f"{service.title()} disconnected successfully",
+            "service": service,
+            "status": "disconnected"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to disconnect {service}: {str(e)}")
