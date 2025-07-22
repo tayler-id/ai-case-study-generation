@@ -19,6 +19,7 @@ from models.user import User
 
 # Import routers
 from routers.auth_router import router as auth_router
+from routers.data_router import router as data_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +59,7 @@ async def shutdown_event():
 
 # Include routers
 app.include_router(auth_router)
+app.include_router(data_router)
 
 @app.get("/")
 async def root():
