@@ -3,7 +3,7 @@
  * Handles frontend authentication flow and API communication
  */
 
-import { User } from '@case-study/shared'
+import { User, UserConnections, PermissionGrantResponse } from '@case-study/shared'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001'
 
@@ -240,4 +240,113 @@ export class AuthService {
       localStorage.removeItem('user_data')
     }
   }
+
+  // ==== CONNECTION MANAGEMENT METHODS ====
+
+  /**
+   * Get connection status for all services
+   */
+  async getConnectionStatus(): Promise<UserConnections> {
+    const response = await fetch(`${API_BASE_URL}/auth/connections/status`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include', // Include HTTP-only cookies
+    })
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        this.clearAuth()
+        throw new Error('Authentication required')
+      }
+      throw new Error(`Failed to get connection status: ${response.statusText}`)
+    }
+
+    return await response.json()
+  }
+
+  /**
+   * Grant permission for a specific service (Gmail or Drive)
+   */
+  async grantServicePermission(service: 'gmail' | 'drive'): Promise<PermissionGrantResponse> {
+    const response = await fetch(`${API_BASE_URL}/auth/connections/${service}/grant`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include', // Include HTTP-only cookies
+    })
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        this.clearAuth()
+        throw new Error('Authentication required')
+      }
+      throw new Error(`Failed to grant ${service} permission: ${response.statusText}`)
+    }
+
+    return await response.json()
+  }
+
+  /**
+   * Disconnect a service by clearing stored tokens
+   */
+  async disconnectService(service: 'gmail' | 'drive'): Promise<{ message: string; service: string; status: string }> {
+    const response = await fetch(`${API_BASE_URL}/auth/connections/${service}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include', // Include HTTP-only cookies
+    })
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        this.clearAuth()
+        throw new Error('Authentication required')
+      }
+      throw new Error(`Failed to disconnect ${service}: ${response.statusText}`)
+    }
+
+    return await response.json()
+  }
+
+  /**
+   * Handle connection callback from OAuth flow
+   */
+  handleConnectionCallback(): { success: boolean; service?: string; status?: string; error?: string } {
+    if (typeof window === 'undefined') return { success: false }
+
+    const urlParams = new URLSearchParams(window.location.search)
+    const service = urlParams.get('connection')
+    const status = urlParams.get('status')
+    const error = urlParams.get('error')
+
+    if (error) {
+      return { 
+        success: false, 
+        error: `Connection failed: ${error}` 
+      }
+    }
+
+    if (service && status) {
+      // Clean up URL parameters
+      const url = new URL(window.location.href)
+      url.searchParams.delete('connection')
+      url.searchParams.delete('status')
+      window.history.replaceState({}, document.title, url.toString())
+
+      return { 
+        success: true, 
+        service, 
+        status 
+      }
+    }
+
+    return { success: false }
+  }
 }
+
+// Create and export singleton instance
+export const authService = AuthService.getInstance()

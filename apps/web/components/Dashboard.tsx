@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Search, Calendar, Users, Star, FileText, Clock } from "lucide-react"
+import { ConnectionStatus } from "@/components/ConnectionStatus"
 
 interface CaseStudy {
   id: string
@@ -136,6 +137,13 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Connection Status */}
+      <div className="p-6 border-b border-border">
+        <ConnectionStatus onConnectionChange={(service, status) => {
+          console.log(`${service} connection status changed to: ${status}`)
+        }} />
       </div>
 
       {/* Studies Grid */}
