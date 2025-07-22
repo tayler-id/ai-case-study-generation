@@ -41,9 +41,19 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/drive.readonly",
     ]
     
+    # LLM Configuration
+    OPENAI_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: Optional[str] = None
+    LANGCHAIN_API_KEY: Optional[str] = None  # For LangSmith tracking
+    LANGCHAIN_PROJECT: str = "case-study-generation"
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
 
 # Global settings instance
 settings = Settings()
+
+def get_settings() -> Settings:
+    """Get the global settings instance"""
+    return settings

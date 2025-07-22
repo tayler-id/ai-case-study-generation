@@ -16,10 +16,12 @@ from database import init_database, get_session
 
 # Import models to ensure they're registered with SQLModel
 from models.user import User
+from models.case_study import CaseStudy, CaseStudySection
 
 # Import routers
 from routers.auth_router import router as auth_router
 from routers.data_router import router as data_router
+from routers.case_study_router import router as case_study_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -60,6 +62,7 @@ async def shutdown_event():
 # Include routers
 app.include_router(auth_router)
 app.include_router(data_router)
+app.include_router(case_study_router)
 
 @app.get("/")
 async def root():
