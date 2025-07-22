@@ -1,0 +1,19 @@
+{
+  "name": "@case-study/shared",
+  "version": "1.0.0",
+  "description": "Shared TypeScript types and utilities for the AI Case Study Generation application",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}
