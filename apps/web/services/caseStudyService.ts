@@ -93,51 +93,77 @@ class CaseStudyService {
     onError: (error: string) => void,
     onComplete: () => void
   ): Promise<void> {
-    const url = new URL(`${this.baseUrl}/case-study/generate/stream`);
-    
-    // Convert request to query params for GET request
-    Object.entries(request).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach(item => url.searchParams.append(key, item));
-      } else if (value !== undefined && value !== null) {
-        url.searchParams.append(key, String(value));
-      }
+    // Use fetch to POST the request and get streaming response
+    const response = await fetch(`${this.baseUrl}/case-study/generate/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
+      credentials: 'include',
+      body: JSON.stringify(request),
     });
 
-    const eventSource = new EventSource(url.toString());
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      onError(error.detail || 'Failed to start streaming generation');
+      return;
+    }
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        if (data.type === 'error') {
-          onError(data.content || 'Unknown error');
-          eventSource.close();
-          return;
+    // Handle Server-Sent Events from fetch response
+    const reader = response.body?.getReader();
+    if (!reader) {
+      onError('No response body reader available');
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6)); // Remove 'data: ' prefix
+              
+              if (data.type === 'error') {
+                onError(data.content || 'Unknown error');
+                return;
+              }
+
+              onChunk({
+                type: data.type,
+                content: data.content,
+                section: data.section,
+                metadata: data.metadata,
+                timestamp: data.timestamp
+              });
+
+              if (data.type === 'metadata' && data.metadata?.generation_complete) {
+                onComplete();
+                return;
+              }
+            } catch (error) {
+              console.warn('Failed to parse SSE data:', line);
+            }
+          }
         }
-
-        onChunk({
-          type: data.type,
-          content: data.content,
-          section: data.section,
-          metadata: data.metadata,
-          timestamp: data.timestamp
-        });
-
-        if (data.type === 'metadata' && data.metadata?.generation_complete) {
-          onComplete();
-          eventSource.close();
-        }
-      } catch (error) {
-        onError('Failed to parse streaming data');
-        eventSource.close();
       }
-    };
-
-    eventSource.onerror = () => {
-      onError('Connection to streaming service failed');
-      eventSource.close();
-    };
+      onComplete();
+    } catch (error) {
+      onError('Streaming connection failed');
+    } finally {
+      reader.releaseLock();
+    }
   }
 
   /**

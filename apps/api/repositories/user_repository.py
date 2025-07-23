@@ -43,6 +43,9 @@ class UserRepository:
     def create_user(self, google_id: str, email: str, name: str, avatar_url: Optional[str] = None) -> User:
         """Create a new user record"""
         try:
+            # Ensure clean transaction state
+            self.session.rollback()  # Clear any aborted transaction
+            
             user = User(
                 google_id=google_id,
                 email=email,
@@ -75,6 +78,9 @@ class UserRepository:
     def find_or_create_user(self, google_id: str, email: str, name: str, avatar_url: Optional[str] = None) -> User:
         """Find existing user or create new one"""
         try:
+            # Ensure clean state
+            self.session.rollback()
+            
             # Try to find by Google ID first
             user = self.get_user_by_google_id(google_id)
             
@@ -90,4 +96,5 @@ class UserRepository:
         except Exception as e:
             # Rollback the transaction on error
             self.session.rollback()
+            logger.error(f"find_or_create_user failed for google_id {google_id}: {str(e)}")
             raise e

@@ -29,8 +29,8 @@ from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHan
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
-from ..config import get_settings
-from ..models.case_study import CaseStudySection, CaseStudyMetadata
+from config import get_settings
+from models.case_study import CaseStudySection, CaseStudyMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,8 @@ class LLMService:
             current_section = None
             accumulated_content = ""
             
-            async for chunk in model.astream(messages, callbacks=[callback]):
+            # Use model.astream without callbacks for OpenAI compatibility
+            async for chunk in model.astream(messages):
                 if hasattr(chunk, 'content') and chunk.content:
                     content = chunk.content
                     accumulated_content += content
@@ -270,28 +271,88 @@ class LLMService:
     def _create_system_prompt(self, template: str, custom_instructions: Optional[str] = None) -> str:
         """Create the system prompt for case study generation"""
         base_prompt = """
-        You are an expert business analyst and case study writer. Your task is to analyze project data 
-        from emails and documents to create comprehensive, actionable case studies.
+        You are an expert business analyst, researcher, and case study writer specializing in deep data analysis. 
+        Your task is to conduct thorough research on project data from emails and documents to create comprehensive, 
+        professional case studies that rival Harvard Business School quality.
         
-        Your case studies should be:
-        - Well-structured with clear sections
-        - Data-driven and evidence-based  
-        - Actionable with specific recommendations
-        - Professional and engaging
-        - Focused on lessons learned and best practices
+        ## DEEP RESEARCH METHODOLOGY:
+        - Analyze ALL provided emails and documents thoroughly
+        - Extract patterns, themes, and insights from communication flows
+        - Identify key decision points and turning moments
+        - Map stakeholder relationships and influence dynamics
+        - Trace project evolution through data chronologically
+        - Find root causes, not just surface-level observations
+        - Cross-reference information across multiple data sources
+        - Quantify outcomes and measure business impact where possible
         
-        Standard case study structure:
-        1. Executive Summary
-        2. Project Background & Context
-        3. Key Stakeholders & Timeline
-        4. Communication Analysis
-        5. Decision Points & Challenges
-        6. Outcomes & Results
-        7. Lessons Learned
-        8. Recommendations & Best Practices
+        ## PROFESSIONAL CASE STUDY STRUCTURE:
         
-        Use the provided email and document data to support your analysis with specific examples,
-        quotes, and timeline details.
+        ### 1. EXECUTIVE SUMMARY
+        - Compelling 2-3 paragraph overview
+        - Key findings and recommendations upfront
+        - Quantified business impact and outcomes
+        
+        ### 2. PROJECT BACKGROUND & STRATEGIC CONTEXT
+        - Industry landscape and competitive positioning
+        - Organizational context and business drivers
+        - Project genesis and strategic rationale
+        - Initial scope, timeline, and success criteria
+        
+        ### 3. STAKEHOLDER ECOSYSTEM & POWER DYNAMICS
+        - Complete stakeholder mapping with roles and influence levels
+        - Communication patterns and relationship dynamics
+        - Decision-making hierarchy and approval processes
+        - External partner/vendor relationships
+        
+        ### 4. PROJECT TIMELINE & CRITICAL MILESTONES
+        - Detailed chronological progression with specific dates
+        - Key milestones, deliverables, and checkpoints
+        - Timeline deviations and course corrections
+        - Resource allocation and team evolution
+        
+        ### 5. COMMUNICATION ANALYSIS & INSIGHTS
+        - Email communication patterns and frequency analysis
+        - Escalation chains and problem-solving approaches
+        - Meeting cadences and decision-making processes
+        - Information flow and knowledge sharing effectiveness
+        
+        ### 6. CHALLENGES, RISKS & CRITICAL DECISIONS
+        - Major obstacles encountered with detailed analysis
+        - Risk mitigation strategies and their effectiveness
+        - Critical decision points with options considered
+        - Trade-offs made and their long-term implications
+        
+        ### 7. OUTCOMES & BUSINESS IMPACT
+        - Quantified results and KPI achievements
+        - Success metrics against original objectives
+        - Unintended consequences and side effects
+        - ROI analysis and cost-benefit evaluation
+        
+        ### 8. LESSONS LEARNED & STRATEGIC INSIGHTS
+        - Key success factors and failure points
+        - Process improvements and methodology refinements  
+        - Organizational learning and capability building
+        - Cultural and behavioral insights
+        
+        ### 9. ACTIONABLE RECOMMENDATIONS
+        - Specific, implementable recommendations
+        - Best practices for similar future projects
+        - Process optimization opportunities
+        - Organizational development suggestions
+        
+        ### 10. APPENDICES & SUPPORTING DATA
+        - Key email excerpts and document references
+        - Timeline visualizations and data tables
+        - Stakeholder interaction maps
+        - Quantitative analysis and metrics
+        
+        ## ANALYSIS REQUIREMENTS:
+        - Use specific quotes, dates, and examples from the data
+        - Reference actual emails and documents by sender/date
+        - Provide quantitative analysis where possible
+        - Create clear cause-and-effect relationships
+        - Support all conclusions with evidence from the data
+        - Make the case study actionable for future projects
         """
         
         if template == "technical":
@@ -320,35 +381,71 @@ class LLMService:
     
     def _format_project_data(self, project_data: Dict[str, Any]) -> str:
         """Format project data for LLM consumption"""
+        logger.info(f"🧠 Formatting project data for LLM consumption")
+        logger.info(f"   Available data sources: {list(project_data.get('data', {}).keys())}")
+        
         formatted_sections = []
         
         # Gmail data formatting
         if 'gmail' in project_data.get('data', {}):
             gmail_data = project_data['data']['gmail']
-            formatted_sections.append("## Email Communications")
-            formatted_sections.append(f"Total emails: {gmail_data.get('metadata', {}).get('total_emails', 0)}")
-            formatted_sections.append(f"Conversations: {gmail_data.get('metadata', {}).get('total_threads', 0)}")
+            total_emails = gmail_data.get('metadata', {}).get('total_emails', 0)
+            total_threads = gmail_data.get('metadata', {}).get('total_threads', 0)
             
-            # Add sample emails
-            emails = gmail_data.get('emails', [])[:10]  # Limit to first 10 for context
-            for email in emails:
+            logger.info(f"   📧 Processing Gmail data: {total_emails} emails, {total_threads} threads")
+            
+            formatted_sections.append("## Email Communications")
+            formatted_sections.append(f"Total emails: {total_emails}")
+            formatted_sections.append(f"Conversations: {total_threads}")
+            
+            # Add sample emails (fix: use 'items' not 'emails')
+            emails = gmail_data.get('items', [])[:50]  # Increased to 50 for deeper analysis
+            logger.info(f"   📧 Including {len(emails)} sample emails in LLM context")
+            
+            for i, email in enumerate(emails):
+                # Extract more comprehensive email details for analysis
+                body_text = email.get('body_text', '')[:2000]  # Increased from 1000 to 2000 chars
+                recipient = email.get('recipient', 'Unknown')
+                labels = ', '.join(email.get('labels', []))
+                attachments = len(email.get('attachments', []))
+                
                 formatted_sections.append(f"""
-                Email: {email.get('subject', 'No Subject')}
+                === EMAIL {i+1} ===
+                Subject: {email.get('subject', 'No Subject')}
                 From: {email.get('sender', 'Unknown')}
+                To: {recipient}
                 Date: {email.get('date', 'Unknown')}
-                Snippet: {email.get('snippet', 'No snippet')}
+                Thread ID: {email.get('thread_id', 'N/A')}
+                Labels: {labels}
+                Attachments: {attachments}
+                
+                Content Preview:
+                {body_text}
+                
+                Email Snippet: {email.get('snippet', 'No snippet')}
+                
                 ---
                 """)
+                if i == 0:  # Log the first email for debugging
+                    logger.debug(f"   📧 First email sample: '{email.get('subject', 'No Subject')[:30]}...' from {email.get('sender', 'Unknown')}")
+        else:
+            logger.warning(f"   ⚠️  No Gmail data found in project_data")
         
         # Drive data formatting
         if 'drive' in project_data.get('data', {}):
             drive_data = project_data['data']['drive']
-            formatted_sections.append("\n## Project Documents")
-            formatted_sections.append(f"Total documents: {drive_data.get('metadata', {}).get('total_documents', 0)}")
+            total_docs = drive_data.get('metadata', {}).get('total_documents', 0)
             
-            # Add sample documents
-            documents = drive_data.get('documents', [])[:10]  # Limit to first 10
-            for doc in documents:
+            logger.info(f"   📁 Processing Drive data: {total_docs} documents")
+            
+            formatted_sections.append("\n## Project Documents")
+            formatted_sections.append(f"Total documents: {total_docs}")
+            
+            # Add sample documents (fix: use 'items' not 'documents')  
+            documents = drive_data.get('items', [])[:25]  # Increased to 25 for deeper analysis
+            logger.info(f"   📁 Including {len(documents)} sample documents in LLM context")
+            
+            for i, doc in enumerate(documents):
                 formatted_sections.append(f"""
                 Document: {doc.get('name', 'Unnamed')}
                 Type: {doc.get('file_type', 'Unknown')}
@@ -356,14 +453,28 @@ class LLMService:
                 Preview: {doc.get('content_preview', 'No preview available')[:200]}...
                 ---
                 """)
+                if i == 0:  # Log the first document for debugging
+                    logger.debug(f"   📁 First document sample: '{doc.get('name', 'Unnamed')[:30]}...'")
+        else:
+            logger.info(f"   📁 No Drive data found in project_data")
         
         # Project metadata
         metadata = project_data.get('metadata', {})
         formatted_sections.append(f"\n## Project Metadata")
         formatted_sections.append(f"Data fetched: {metadata.get('fetch_timestamp', 'Unknown')}")
         formatted_sections.append(f"Sources: {', '.join(metadata.get('sources_fetched', []))}")
+        formatted_sections.append(f"Total items: {metadata.get('total_items_fetched', 0)}")
         
-        return "\n".join(formatted_sections)
+        formatted_text = "\n".join(formatted_sections)
+        char_count = len(formatted_text)
+        logger.info(f"🧠 Formatted project data ready: {char_count} characters")
+        logger.info(f"   📊 Data breakdown: {len(formatted_sections)} sections formatted")
+        
+        # Log a preview of the formatted data
+        preview = formatted_text[:200] + "..." if len(formatted_text) > 200 else formatted_text
+        logger.debug(f"   📝 Formatted data preview: {preview}")
+        
+        return formatted_text
     
     def _is_section_boundary(self, text: str) -> bool:
         """Detect if we've hit a section boundary in the generated text"""

@@ -6,16 +6,19 @@ Handles fetching emails and metadata using Gmail API
 from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
+from google.auth.transport.requests import Request  
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import base64
 import email
 import html
 import re
+import logging
 from dataclasses import dataclass
 
 from models.user import User
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -96,48 +99,157 @@ class GmailService:
     def search_emails(
         self, 
         query: str, 
-        max_results: int = 50,
+        max_results: int = 1000,
         date_range: Optional[tuple[datetime, datetime]] = None
     ) -> List[EmailMessage]:
         """
-        Search for emails using Gmail search query syntax
+        Search for emails using Gmail search query syntax with pagination support
         
         Args:
             query: Gmail search query (e.g., "from:example.com project")
-            max_results: Maximum number of emails to return
+            max_results: Maximum number of emails to return (supports up to 500)
             date_range: Optional tuple of (start_date, end_date)
             
         Returns:
             List of EmailMessage objects
         """
+        logger.info(f"📧 Starting email search for user {self.user.email}")
+        logger.info(f"   Query: '{query}' | Max results: {max_results}")
+        if date_range:
+            logger.info(f"   Date range: {date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}")
+        
+        start_time = datetime.now()
+        
         try:
             # Build search query with date range if provided
             search_query = query
             if date_range:
                 start_date, end_date = date_range
-                search_query += f" after:{start_date.strftime('%Y/%m/%d')}"
-                search_query += f" before:{end_date.strftime('%Y/%m/%d')}"
+                # Gmail date format: YYYY/MM/DD
+                date_after = start_date.strftime('%Y/%m/%d')
+                date_before = end_date.strftime('%Y/%m/%d')
+                search_query += f" after:{date_after} before:{date_before}"
+                logger.debug(f"   Applied date range: after:{date_after} before:{date_before}")
             
-            # Search for message IDs
-            results = self.service.users().messages().list(
-                userId='me',
-                q=search_query,
-                maxResults=max_results
-            ).execute()
+            logger.info(f"   Final query: '{search_query}'")
             
-            messages = results.get('messages', [])
+            # Gmail API single requests are limited to 100, use pagination for more
+            # Use pagination for requests > 100
+            if max_results <= 100:
+                logger.info("   Using single-page search (≤100 results)")
+                emails = self._search_emails_single_page(search_query, max_results)
+            else:
+                logger.info("   Using paginated search (>100 results)")
+                emails = self._search_emails_paginated(search_query, max_results)
             
-            # Fetch full message details
-            email_messages = []
-            for msg in messages:
-                message_detail = self._get_message_detail(msg['id'])
-                if message_detail:
-                    email_messages.append(message_detail)
+            duration = (datetime.now() - start_time).total_seconds()
+            logger.info(f"✅ Email search completed in {duration:.2f}s")
+            logger.info(f"   Retrieved {len(emails)} emails")
             
-            return email_messages
+            if emails:
+                # Log sample of results
+                logger.info(f"   First email: '{emails[0].subject[:50]}...' from {emails[0].sender}")
+                logger.info(f"   Last email: '{emails[-1].subject[:50]}...' from {emails[-1].sender}")
+                logger.info(f"   Date span: {emails[-1].date.strftime('%Y-%m-%d')} to {emails[0].date.strftime('%Y-%m-%d')}")
+            
+            return emails
             
         except HttpError as error:
+            logger.error(f"❌ Gmail API error during search: {error}")
             raise ValueError(f"Gmail API error: {error}")
+        except Exception as e:
+            logger.error(f"❌ Unexpected error during email search: {str(e)}")
+            raise
+    
+    def _search_emails_single_page(self, query: str, max_results: int) -> List[EmailMessage]:
+        """Search emails in a single API call (max 100 results)"""
+        logger.debug(f"   📄 Single page request: {max_results} emails")
+        
+        results = self.service.users().messages().list(
+            userId='me',
+            q=query,
+            maxResults=min(max_results, 100)
+        ).execute()
+        
+        messages = results.get('messages', [])
+        logger.debug(f"   📄 Gmail API returned {len(messages)} message IDs")
+        
+        # Fetch full message details
+        email_messages = []
+        for i, msg in enumerate(messages):
+            message_detail = self._get_message_detail(msg['id'])
+            if message_detail:
+                email_messages.append(message_detail)
+                if (i + 1) % 20 == 0:  # Log progress every 20 emails
+                    logger.debug(f"   📄 Processed {i + 1}/{len(messages)} emails")
+        
+        logger.debug(f"   📄 Successfully parsed {len(email_messages)} emails")
+        return email_messages
+    
+    def _search_emails_paginated(self, query: str, max_results: int) -> List[EmailMessage]:
+        """Search emails with pagination for > 100 results"""
+        logger.info(f"   📚 Starting paginated search for {max_results} emails")
+        
+        all_messages = []
+        next_page_token = None
+        remaining_results = max_results  # No absolute limit with proper pagination
+        page_count = 0
+        
+        while remaining_results > 0:
+            page_count += 1
+            # Calculate page size (max 100 per request)
+            page_size = min(remaining_results, 100)
+            
+            logger.debug(f"   📚 Page {page_count}: requesting {page_size} emails")
+            
+            # Make API request
+            request_params = {
+                'userId': 'me',
+                'q': query,
+                'maxResults': page_size
+            }
+            
+            if next_page_token:
+                request_params['pageToken'] = next_page_token
+            
+            results = self.service.users().messages().list(**request_params).execute()
+            
+            messages = results.get('messages', [])
+            if not messages:
+                logger.debug(f"   📚 Page {page_count}: No more messages found")
+                break
+            
+            logger.debug(f"   📚 Page {page_count}: Gmail API returned {len(messages)} message IDs")
+            
+            # Fetch full message details for this page
+            page_start = len(all_messages)
+            for msg in messages:
+                if len(all_messages) >= max_results:
+                    break
+                    
+                message_detail = self._get_message_detail(msg['id'])
+                if message_detail:
+                    all_messages.append(message_detail)
+            
+            page_end = len(all_messages)
+            logger.debug(f"   📚 Page {page_count}: Processed {page_end - page_start} emails (total: {page_end})")
+            
+            # Check if we have more pages and need more results
+            next_page_token = results.get('nextPageToken')
+            if not next_page_token or len(all_messages) >= max_results:
+                logger.debug(f"   📚 Pagination complete: {'no next page' if not next_page_token else 'reached max results'}")
+                break
+                
+            remaining_results -= len(messages)
+            
+            # Add small delay to respect rate limits
+            import time
+            time.sleep(0.1)
+            logger.debug(f"   📚 Rate limit delay applied (0.1s)")
+        
+        final_count = len(all_messages[:max_results])
+        logger.info(f"   📚 Pagination completed: {final_count} emails across {page_count} pages")
+        return all_messages[:max_results]
     
     def get_threads(
         self, 
@@ -161,8 +273,10 @@ class GmailService:
             search_query = query
             if date_range:
                 start_date, end_date = date_range
-                search_query += f" after:{start_date.strftime('%Y/%m/%d')}"
-                search_query += f" before:{end_date.strftime('%Y/%m/%d')}"
+                # Gmail date format: YYYY/MM/DD
+                date_after = start_date.strftime('%Y/%m/%d')
+                date_before = end_date.strftime('%Y/%m/%d')
+                search_query += f" after:{date_after} before:{date_before}"
             
             # Search for thread IDs
             results = self.service.users().threads().list(
@@ -373,7 +487,7 @@ class GmailService:
         project_keywords: List[str],
         participant_emails: List[str],
         date_range: tuple[datetime, datetime],
-        max_results: int = 100
+        max_results: int = 1000
     ) -> Dict[str, Any]:
         """
         Get emails related to a specific project
@@ -387,6 +501,14 @@ class GmailService:
         Returns:
             Dictionary containing emails, threads, and metadata
         """
+        logger.info(f"🎯 Starting project email retrieval")
+        logger.info(f"   Keywords: {project_keywords}")
+        logger.info(f"   Participants: {participant_emails}")
+        logger.info(f"   Date range: {date_range[0].strftime('%Y-%m-%d')} to {date_range[1].strftime('%Y-%m-%d')}")
+        logger.info(f"   Max results: {max_results}")
+        
+        start_time = datetime.now()
+        
         try:
             # Build search query
             keyword_query = " OR ".join([f'"{keyword}"' for keyword in project_keywords])
@@ -394,9 +516,13 @@ class GmailService:
             participant_query += " OR " + " OR ".join([f"to:{email}" for email in participant_emails])
             
             query = f"({keyword_query}) AND ({participant_query})"
+            logger.info(f"   Built search query: {query}")
             
             # Fetch emails and threads
+            logger.info("   📧 Fetching project emails...")
             emails = self.search_emails(query, max_results, date_range)
+            
+            logger.info("   🧵 Fetching email threads...")
             threads = self.get_threads(query, max_results // 2, date_range)
             
             # Calculate statistics
@@ -412,7 +538,23 @@ class GmailService:
                     unique_participants.add(email.sender)
                     unique_participants.add(email.recipient)
             
-            return {
+            # Log results summary
+            duration = (datetime.now() - start_time).total_seconds()
+            logger.info(f"✅ Project email retrieval completed in {duration:.2f}s")
+            logger.info(f"   📧 Total emails: {total_emails}")
+            logger.info(f"   🧵 Total threads: {len(threads)}")
+            logger.info(f"   👥 Unique participants: {len(unique_participants)}")
+            
+            if date_range_actual:
+                logger.info(f"   📅 Actual date span: {date_range_actual[0].strftime('%Y-%m-%d')} to {date_range_actual[1].strftime('%Y-%m-%d')}")
+            
+            # Log participant breakdown
+            if unique_participants:
+                logger.info(f"   👥 Participants found: {', '.join(list(unique_participants)[:5])}")
+                if len(unique_participants) > 5:
+                    logger.info(f"   👥 ... and {len(unique_participants) - 5} more")
+            
+            result = {
                 'emails': [self._email_to_dict(email) for email in emails],
                 'threads': [self._thread_to_dict(thread) for thread in threads],
                 'metadata': {
@@ -424,11 +566,16 @@ class GmailService:
                         'end': date_range_actual[1].isoformat() if date_range_actual else None
                     },
                     'keywords_used': project_keywords,
-                    'search_query': query
+                    'search_query': query,
+                    'fetch_duration_seconds': duration
                 }
             }
             
+            logger.info(f"🎯 Project email data packaged for return: {len(result['emails'])} items")
+            return result
+            
         except Exception as e:
+            logger.error(f"❌ Failed to fetch project emails: {str(e)}")
             raise ValueError(f"Failed to fetch project emails: {str(e)}")
     
     def _email_to_dict(self, email: EmailMessage) -> Dict[str, Any]:
@@ -458,3 +605,10 @@ class GmailService:
             'messages': [self._email_to_dict(msg) for msg in thread.messages],
             'labels': thread.labels
         }
+
+# Global service instance
+_gmail_service_instance = None
+
+def get_gmail_service(user: User) -> GmailService:
+    """Get Gmail service instance for a specific user"""
+    return GmailService(user)

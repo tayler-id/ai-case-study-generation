@@ -5,8 +5,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader, Send, Bot, User, Calendar, Users, Hash, FolderOpen } from "lucide-react"
+import { Loader, Send, Bot, User, Calendar, Users, Hash, FolderOpen, Settings, Eye, Play } from "lucide-react"
 import { ProjectScope } from "@/components/ProjectScopingModal"
+import { EnhancedProjectScopingModal } from "@/components/EnhancedProjectScopingModal"
+import { caseStudyService, type CaseStudyGenerationRequest, type StreamChunk } from "@/services/caseStudyService"
 
 interface Message {
   id: string
@@ -18,6 +20,10 @@ interface Message {
 interface ChatPanelProps {
   projectScope?: ProjectScope
   onSendMessage?: (message: string) => void
+  onProjectScopeUpdate?: (scope: ProjectScope) => void
+  onStartGeneration?: () => void
+  onStreamChunk?: (chunk: StreamChunk) => void
+  onGenerationComplete?: () => void
   isGenerating?: boolean
   agentStatus?: string
 }
@@ -25,6 +31,10 @@ interface ChatPanelProps {
 export function ChatPanel({ 
   projectScope, 
   onSendMessage, 
+  onProjectScopeUpdate,
+  onStartGeneration,
+  onStreamChunk,
+  onGenerationComplete,
   isGenerating = false,
   agentStatus = "Ready"
 }: ChatPanelProps) {
@@ -37,6 +47,7 @@ export function ChatPanel({
     }
   ])
   const [inputValue, setInputValue] = useState("")
+  const [scopingModalOpen, setScopingModalOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -80,17 +91,103 @@ export function ChatPanel({
     }
   }
 
+  const handleScopeSubmit = (scope: any) => {
+    onProjectScopeUpdate?.(scope)
+    setScopingModalOpen(false)
+    
+    // Add a message to the chat about the scope update
+    const scopeMessage: Message = {
+      id: Date.now().toString(),
+      type: 'agent',
+      content: `Great! I've updated the project scope for "${scope.projectName}". I'm now ready to generate your case study with the defined parameters.`,
+      timestamp: new Date()
+    }
+    setMessages(prev => [...prev, scopeMessage])
+  }
+
+  const handleStartGeneration = async () => {
+    if (!projectScope) return
+    
+    onStartGeneration?.()
+    
+    // Add user message indicating generation start
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      type: 'user',
+      content: 'Generate case study',
+      timestamp: new Date()
+    }
+    setMessages(prev => [...prev, userMessage])
+
+    // Add agent response
+    const agentMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      type: 'agent',
+      content: `Starting case study generation for "${projectScope.projectName}"... I'll analyze your data and generate comprehensive insights.`,
+      timestamp: new Date()
+    }
+    setMessages(prev => [...prev, agentMessage])
+
+    try {
+      const request: CaseStudyGenerationRequest = {
+        project_name: projectScope.projectName,
+        project_industry: projectScope.industry || undefined,
+        project_focus: projectScope.focus || undefined,
+        date_range_start: new Date(projectScope.dateRange.start).toISOString(),
+        date_range_end: new Date(projectScope.dateRange.end).toISOString(),
+        participants: projectScope.participants,
+        keywords: projectScope.keywords,
+        template_type: 'comprehensive',
+        model_name: 'gpt-4',
+      }
+
+      await caseStudyService.generateStreaming(
+        request,
+        (chunk) => {
+          onStreamChunk?.(chunk)
+        },
+        (error) => {
+          const errorMessage: Message = {
+            id: Date.now().toString(),
+            type: 'agent',
+            content: `I encountered an error during generation: ${error}`,
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, errorMessage])
+        },
+        () => {
+          const completionMessage: Message = {
+            id: Date.now().toString(),
+            type: 'agent',
+            content: 'Case study generation completed! You can review and edit the content in the canvas.',
+            timestamp: new Date()
+          }
+          setMessages(prev => [...prev, completionMessage])
+          onGenerationComplete?.()
+        }
+      )
+    } catch (error) {
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        type: 'agent',
+        content: `Failed to start generation: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorMessage])
+    }
+  }
+
   const getAgentStatusIcon = () => {
     switch (agentStatus.toLowerCase()) {
       case 'analyzing':
         return <Loader className="w-4 h-4 animate-spin" />
       case 'writing':
-        return <div className="w-4 h-4 bg-blue-500 rounded-full animate-pulse" />
+        return <div className="w-4 h-4 bg-blue-500 rounded-full animate-pulse-slow" />
       case 'thinking':
         return <div className="flex gap-1">
-          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-slow" style={{ animationDelay: '0ms' }} />
+          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-slow" style={{ animationDelay: '600ms' }} />
+          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-slow" style={{ animationDelay: '1200ms' }} />
         </div>
       default:
         return <div className="w-4 h-4 bg-green-500 rounded-full" />
@@ -108,9 +205,20 @@ export function ChatPanel({
   return (
     <div className="h-full bg-background border-r border-border flex flex-col">
       {/* Project Scope Header */}
-      {projectScope && (
+      {projectScope ? (
         <div className="p-6 border-b border-border">
-          <h3 className="font-semibold text-foreground mb-3">Project Scope</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-foreground">Project Scope</h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setScopingModalOpen(true)}
+              disabled={isGenerating}
+            >
+              <Settings className="w-4 h-4 mr-1" />
+              Edit
+            </Button>
+          </div>
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm">
               <Calendar className="w-4 h-4 text-muted-foreground" />
@@ -133,7 +241,7 @@ export function ChatPanel({
               </div>
             )}
 
-            {projectScope.participants.length > 0 && (
+            {projectScope.participants && Array.isArray(projectScope.participants) && projectScope.participants.length > 0 && (
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Users className="w-4 h-4" />
@@ -154,7 +262,7 @@ export function ChatPanel({
               </div>
             )}
 
-            {projectScope.keywords.length > 0 && (
+            {projectScope.keywords && Array.isArray(projectScope.keywords) && projectScope.keywords.length > 0 && (
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Hash className="w-4 h-4" />
@@ -170,7 +278,7 @@ export function ChatPanel({
               </div>
             )}
 
-            {projectScope.folders.length > 0 && (
+            {projectScope.folders && Array.isArray(projectScope.folders) && projectScope.folders.length > 0 && (
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <FolderOpen className="w-4 h-4" />
@@ -185,6 +293,37 @@ export function ChatPanel({
                 </div>
               </div>
             )}
+          </div>
+          
+          {/* Generate Case Study Button */}
+          <div className="mt-4 pt-4 border-t border-border">
+            <Button
+              onClick={handleStartGeneration}
+              disabled={isGenerating}
+              className="w-full"
+            >
+              <Play className="w-4 h-4 mr-2" />
+              {isGenerating ? 'Generating...' : 'Generate Case Study'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="p-6 border-b border-border">
+          <div className="text-center space-y-4">
+            <div className="space-y-2">
+              <h3 className="font-semibold text-foreground">No Project Scope Defined</h3>
+              <p className="text-sm text-muted-foreground">
+                Define your project scope to start generating case studies from your data.
+              </p>
+            </div>
+            <Button
+              onClick={() => setScopingModalOpen(true)}
+              disabled={isGenerating}
+              className="w-full"
+            >
+              <Eye className="w-4 h-4 mr-2" />
+              Define Project Scope
+            </Button>
           </div>
         </div>
       )}
@@ -254,6 +393,13 @@ export function ChatPanel({
           </Button>
         </div>
       </div>
+
+      {/* Enhanced Project Scoping Modal */}
+      <EnhancedProjectScopingModal
+        open={scopingModalOpen}
+        onOpenChange={setScopingModalOpen}
+        onSubmit={handleScopeSubmit}
+      />
     </div>
   )
 }

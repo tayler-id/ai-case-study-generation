@@ -4,6 +4,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import { ChatPanel } from "@/components/ChatPanel"
 import { Canvas } from "@/components/Canvas"
 import { ProjectScope } from "@/components/ProjectScopingModal"
+import { type StreamChunk } from "@/services/caseStudyService"
 
 interface CaseStudy {
   id: string
@@ -27,6 +28,10 @@ interface MainContentProps {
   isGenerating?: boolean
   agentStatus?: string
   onSendMessage?: (message: string) => void
+  onProjectScopeUpdate?: (scope: ProjectScope) => void
+  onStartGeneration?: () => void
+  onStreamChunk?: (chunk: StreamChunk) => void
+  onGenerationComplete?: () => void
   onContentChange?: (content: string) => void
   onSaveStudy?: (content: string) => void
 }
@@ -37,6 +42,10 @@ export function MainContent({
   isGenerating = false,
   agentStatus = "Ready",
   onSendMessage,
+  onProjectScopeUpdate,
+  onStartGeneration,
+  onStreamChunk,
+  onGenerationComplete,
   onContentChange,
   onSaveStudy
 }: MainContentProps) {
@@ -47,6 +56,10 @@ export function MainContent({
           <ChatPanel
             projectScope={projectScope || undefined}
             onSendMessage={onSendMessage}
+            onProjectScopeUpdate={onProjectScopeUpdate}
+            onStartGeneration={onStartGeneration}
+            onStreamChunk={onStreamChunk}
+            onGenerationComplete={onGenerationComplete}
             isGenerating={isGenerating}
             agentStatus={agentStatus}
           />

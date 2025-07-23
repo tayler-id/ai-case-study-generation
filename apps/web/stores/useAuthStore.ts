@@ -36,7 +36,7 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isAuthenticated: false,
-  isLoading: true,
+  isLoading: false, // Start as false, set to true only when actively checking
   error: null,
   
   // Connection management state
@@ -80,7 +80,34 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ isLoading: true, error: null })
       const authService = AuthService.getInstance()
       
-      // Always try to fetch current user from API to validate HTTP-only cookie
+      // First check if we have user data locally (faster)
+      const localUser = authService.getUser()
+      if (localUser) {
+        // Set user immediately from local data
+        set({ 
+          user: localUser, 
+          isAuthenticated: true, 
+          isLoading: false,
+          error: null
+        })
+        
+        // Then validate with server in background (don't set loading state)
+        try {
+          const validatedUser = await authService.fetchCurrentUser()
+          if (validatedUser) {
+            set({ user: validatedUser, isAuthenticated: true, error: null })
+          } else {
+            // Server validation failed, clear auth
+            set({ user: null, isAuthenticated: false, error: null })
+          }
+        } catch (e) {
+          // Background validation failed, but keep local user for now
+          console.warn('Background auth validation failed:', e)
+        }
+        return
+      }
+      
+      // No local user, try server validation
       const user = await authService.fetchCurrentUser()
       
       if (user) {
@@ -100,10 +127,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         })
       }
     } catch (error) {
+      console.error('Auth check failed:', error)
       set({ 
         user: null,
         isAuthenticated: false,
-        error: error instanceof Error ? error.message : 'Authentication check failed',
+        error: null, // Don't show error on initial load
         isLoading: false 
       })
     }
@@ -169,8 +197,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const authService = AuthService.getInstance()
       const response = await authService.grantServicePermission(service)
       
-      // Redirect to OAuth URL (this will cause page navigation)
-      window.location.href = response.authUrl
+      // Check if authentication is required or if service is already connected
+      if (response.error === 'authentication_required') {
+        // User needs to re-authenticate to get permissions
+        window.location.href = response.authUrl
+      } else if (response.status === 'connected') {
+        // Service was successfully activated, refresh connections
+        await get().loadConnections()
+      }
     } catch (error) {
       set({ 
         connectionsError: error instanceof Error ? error.message : `Failed to grant ${service} permission`
@@ -221,7 +255,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   }
 }))
 
-// Initialize auth check on store creation
+// Initialize auth check on store creation with timeout protection
 if (typeof window !== 'undefined') {
-  useAuthStore.getState().checkAuth()
+  const initAuth = async () => {
+    try {
+      // Set a timeout for the initial auth check
+      const authPromise = useAuthStore.getState().checkAuth()
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Auth check timeout')), 10000)
+      )
+      
+      await Promise.race([authPromise, timeoutPromise])
+    } catch (error) {
+      console.warn('Initial auth check failed or timed out:', error)
+      // Ensure loading state is cleared even on timeout/error
+      useAuthStore.setState({ 
+        isLoading: false, 
+        user: null, 
+        isAuthenticated: false, 
+        error: null 
+      })
+    }
+  }
+  
+  initAuth()
 }

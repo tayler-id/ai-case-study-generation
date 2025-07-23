@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import mimetypes
 
 from models.user import User
+from .base_service import BaseService, ServiceType
 
 
 @dataclass
@@ -50,7 +51,7 @@ class DriveFolder:
     children: List[DriveFile]
 
 
-class DriveService:
+class DriveService(BaseService):
     """Service class for interacting with Google Drive API"""
     
     # Supported file types for content extraction
@@ -435,3 +436,10 @@ class DriveService:
             'description': file.description,
             'content_preview': file.content_preview
         }
+
+# Global service instance
+_drive_service_instance = None
+
+def get_drive_service(user: User) -> DriveService:
+    """Get Drive service instance for a specific user"""
+    return DriveService(user)

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlmodel import Session
+import logging
 
 from database import get_session
 from models.user import User
@@ -16,6 +17,8 @@ from services.gmail_service import GmailService
 from services.drive_service import DriveService
 from services.token_refresh_service import TokenRefreshService
 from routers.auth_router import get_current_user_from_token
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/data", tags=["Data Fetching"])
 
@@ -27,7 +30,7 @@ class ProjectScopeRequest(BaseModel):
     participant_emails: List[str] = Field(..., description="Email addresses of project participants")
     start_date: datetime = Field(..., description="Project start date")
     end_date: datetime = Field(..., description="Project end date")
-    max_results: Optional[int] = Field(50, description="Maximum number of results to return")
+    max_results: Optional[int] = Field(1000, description="Maximum number of results to return")
 
 
 class DataFetchResponse(BaseModel):
@@ -55,29 +58,49 @@ async def fetch_gmail_data(
     Returns:
         Gmail data and metadata
     """
+    logger.info(f"🔄 Gmail data fetch request received")
+    logger.info(f"   Project: {scope.project_name}")
+    logger.info(f"   Keywords: {scope.keywords}")
+    logger.info(f"   Participants: {scope.participant_emails}")
+    logger.info(f"   Date range: {scope.start_date} to {scope.end_date}")
+    logger.info(f"   Max results: {scope.max_results}")
+    
+    start_time = datetime.utcnow()
+    
     try:
         # Get current user
         user = get_current_user_from_token(request, session)
+        logger.info(f"✅ User authenticated: {user.email}")
         
         # Check if Gmail is connected
         if not user.is_gmail_connected:
+            logger.error(f"❌ Gmail not connected for user {user.email}")
             raise HTTPException(
                 status_code=400, 
                 detail="Gmail is not connected. Please connect Gmail first."
             )
         
+        logger.info(f"✅ Gmail is connected for user {user.email}")
+        
         # Refresh tokens if needed
+        logger.info("🔄 Refreshing Gmail tokens...")
         token_service = TokenRefreshService(session)
         if not token_service.refresh_gmail_token(user):
+            logger.error(f"❌ Failed to refresh Gmail tokens for user {user.email}")
             raise HTTPException(
                 status_code=400,
                 detail="Failed to refresh Gmail tokens. Please reconnect Gmail."
             )
         
+        logger.info("✅ Gmail tokens refreshed successfully")
+        
         # Initialize Gmail service
+        logger.info("🔄 Initializing Gmail service...")
         gmail_service = GmailService(user)
+        logger.info("✅ Gmail service initialized")
         
         # Fetch project emails
+        logger.info("📧 Fetching project emails...")
         email_data = gmail_service.get_project_emails(
             project_keywords=scope.keywords,
             participant_emails=scope.participant_emails,
@@ -85,12 +108,20 @@ async def fetch_gmail_data(
             max_results=scope.max_results
         )
         
+        # Log results
+        total_emails = email_data.get('metadata', {}).get('total_emails', 0)
+        total_threads = email_data.get('metadata', {}).get('total_threads', 0)
+        logger.info(f"✅ Email fetch completed: {total_emails} emails, {total_threads} threads")
+        
         # Add project context to metadata
         email_data['metadata'].update({
             'project_name': scope.project_name,
             'fetch_timestamp': datetime.utcnow().isoformat(),
             'user_id': str(user.id)
         })
+        
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        logger.info(f"🏁 Gmail data fetch completed in {duration:.2f}s")
         
         return DataFetchResponse(
             success=True,
@@ -101,6 +132,8 @@ async def fetch_gmail_data(
     except HTTPException:
         raise
     except Exception as e:
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        logger.error(f"❌ Gmail data fetch failed after {duration:.2f}s: {str(e)}")
         return DataFetchResponse(
             success=False,
             data={},

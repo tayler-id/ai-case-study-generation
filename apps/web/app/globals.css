@@ -75,12 +75,25 @@ body {
   }
 }
 
+@keyframes bounce-slow {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-25%);
+  }
+}
+
 .animate-pulse-slow {
   animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 .animate-typing {
   animation: typing 2s steps(40, end);
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 2s infinite;
 }
 
 /* Markdown styling */

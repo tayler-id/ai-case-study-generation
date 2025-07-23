@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Optional, Dict, Any, List
 from sqlmodel import SQLModel, Field, Column, JSON, Relationship
 from sqlalchemy import Text
+import uuid
 
 class CaseStudyStatus(str, Enum):
     """Status of case study generation"""
@@ -59,7 +60,7 @@ class CaseStudy(SQLModel, table=True):
     __tablename__ = "case_studies"
     
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="users.id")
+    user_id: uuid.UUID = Field(foreign_key="user.id")
     
     # Project Details
     project_name: str = Field(max_length=200)

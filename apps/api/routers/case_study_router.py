@@ -7,6 +7,7 @@ Handles case study generation requests with streaming support for real-time upda
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
@@ -15,18 +16,18 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 from sse_starlette.sse import EventSourceResponse
 
-from ..database import get_session
-from ..models.user import User
-from ..models.case_study import (
+from database import get_session
+from models.user import User
+from models.case_study import (
     CaseStudy, 
     CaseStudyGenerationRequest, 
     CaseStudyResponse,
     CaseStudyStatus,
     CaseStudyStreamEvent
 )
-from ..services.llm_service import get_llm_service
-from ..services.data_service import get_data_service
-from ..dependencies import get_current_user
+from services.llm_service import get_llm_service
+from services.data_service import get_data_service
+from routers.auth_router import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def start_case_study_generation(
     try:
         # Create case study record
         case_study = CaseStudy(
-            user_id=current_user.id,
+            user_id=uuid.UUID(current_user['id']),
             project_name=request.project_name,
             project_industry=request.project_industry,
             project_focus=request.project_focus,
@@ -68,7 +69,7 @@ async def start_case_study_generation(
         background_tasks.add_task(
             generate_case_study_background,
             case_study.id,
-            current_user.id
+            uuid.UUID(current_user['id'])
         )
         
         return {
@@ -81,7 +82,7 @@ async def start_case_study_generation(
         logger.error(f"Failed to start case study generation: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to start generation: {str(e)}")
 
-@router.get("/generate/stream")
+@router.post("/generate/stream")
 async def generate_case_study_stream(
     request: CaseStudyGenerationRequest,
     current_user: User = Depends(get_current_user),
@@ -90,6 +91,14 @@ async def generate_case_study_stream(
     """
     Generate case study with real-time streaming (for direct streaming without background tasks)
     """
+    logger.info(f"🎬 Starting streaming case study generation for user {current_user['email']}")
+    logger.info(f"   Project: {request.project_name}")
+    logger.info(f"   Keywords: {request.keywords}")
+    logger.info(f"   Participants: {request.participants}")
+    logger.info(f"   Date range: {request.date_range_start} to {request.date_range_end}")
+    logger.info(f"   Model: {request.model_name}")
+    logger.info(f"   Template: {request.template_type}")
+    
     try:
         # Get project data first
         data_service = get_data_service()
@@ -99,7 +108,7 @@ async def generate_case_study_stream(
             "participant_emails": request.participants,
             "start_date": request.date_range_start.isoformat(),
             "end_date": request.date_range_end.isoformat()
-        }, current_user.id)
+        }, uuid.UUID(current_user['id']), session)
         
         # Generate case study with streaming
         llm_service = get_llm_service()
@@ -153,7 +162,7 @@ async def stream_case_study_progress(
     """
     # Verify case study belongs to user
     case_study = session.get(CaseStudy, case_study_id)
-    if not case_study or case_study.user_id != current_user.id:
+    if not case_study or case_study.user_id != uuid.UUID(current_user['id']):
         raise HTTPException(status_code=404, detail="Case study not found")
     
     async def stream_generator():
@@ -217,7 +226,7 @@ async def get_case_study(
 ) -> CaseStudyResponse:
     """Get case study by ID"""
     case_study = session.get(CaseStudy, case_study_id)
-    if not case_study or case_study.user_id != current_user.id:
+    if not case_study or case_study.user_id != uuid.UUID(current_user['id']):
         raise HTTPException(status_code=404, detail="Case study not found")
     
     return CaseStudyResponse(
@@ -248,7 +257,7 @@ async def list_case_studies(
     """List case studies for the current user"""
     statement = (
         select(CaseStudy)
-        .where(CaseStudy.user_id == current_user.id)
+        .where(CaseStudy.user_id == uuid.UUID(current_user['id']))
         .order_by(CaseStudy.created_at.desc())
         .offset(offset)
         .limit(limit)
@@ -281,7 +290,7 @@ async def delete_case_study(
 ) -> Dict[str, str]:
     """Delete a case study"""
     case_study = session.get(CaseStudy, case_study_id)
-    if not case_study or case_study.user_id != current_user.id:
+    if not case_study or case_study.user_id != uuid.UUID(current_user['id']):
         raise HTTPException(status_code=404, detail="Case study not found")
     
     session.delete(case_study)
@@ -293,7 +302,7 @@ async def generate_case_study_background(case_study_id: int, user_id: int):
     """
     Background task to generate case study content
     """
-    from ..database import get_session
+    from database import get_session
     
     session = next(get_session())
     
@@ -327,7 +336,7 @@ async def generate_case_study_background(case_study_id: int, user_id: int):
             "participant_emails": case_study.participants,
             "start_date": case_study.date_range_start.isoformat(),
             "end_date": case_study.date_range_end.isoformat()
-        }, user_id)
+        }, user_id, session)
         
         case_study.progress_percentage = 20
         session.commit()

@@ -8,6 +8,7 @@ import { Dashboard } from "@/components/Dashboard"
 import { ProjectScope } from "@/components/ProjectScopingModal"
 import { useAuthStore } from "@/stores/useAuthStore"
 import { User } from "@case-study/shared"
+import { type StreamChunk } from "@/services/caseStudyService"
 
 interface CaseStudy {
   id: string
@@ -27,11 +28,12 @@ interface CaseStudy {
 
 export default function HomePage() {
   const { user, isAuthenticated, isLoading, logout } = useAuthStore()
-  const [currentView, setCurrentView] = useState<'dashboard' | 'study'>('dashboard')
+  const [currentView, setCurrentView] = useState<'dashboard' | 'study'>('study')
   const [currentStudy, setCurrentStudy] = useState<CaseStudy | null>(null)
   const [projectScope, setProjectScope] = useState<ProjectScope | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [agentStatus, setAgentStatus] = useState("Ready")
+  const [streamedContent, setStreamedContent] = useState("")
 
   const handleAuthenticated = (authenticatedUser: User) => {
     // This is now handled by the auth store
@@ -101,6 +103,59 @@ export default function HomePage() {
     }
   }
 
+  const handleStartGeneration = () => {
+    setIsGenerating(true)
+    setAgentStatus("Starting generation")
+    setStreamedContent("")
+    
+    // Create a new case study when generation starts
+    if (projectScope) {
+      setCurrentStudy({
+        id: Date.now().toString(),
+        title: projectScope.projectName,
+        dateCreated: new Date().toISOString().split('T')[0],
+        dateRange: projectScope.dateRange,
+        participants: projectScope.participants,
+        keywords: projectScope.keywords,
+        rating: 0,
+        status: 'in-progress',
+        summary: `Analysis of ${projectScope.projectName} from ${projectScope.dateRange.start} to ${projectScope.dateRange.end}`,
+        content: ""
+      })
+    }
+  }
+
+  const handleStreamChunk = (chunk: StreamChunk) => {
+    if (chunk.type === 'content') {
+      setStreamedContent(prev => prev + chunk.content)
+      setAgentStatus("Writing case study")
+    } else if (chunk.type === 'section_start' && chunk.section) {
+      setAgentStatus(`Writing: ${chunk.section}`)
+    } else if (chunk.type === 'section_end') {
+      setAgentStatus("Generating insights")
+    }
+    
+    // Update current study content in real-time
+    if (chunk.type === 'content') {
+      setCurrentStudy(prev => prev ? {
+        ...prev,
+        content: (prev.content || "") + chunk.content,
+        status: 'in-progress' as const
+      } : null)
+    }
+  }
+
+  const handleGenerationComplete = () => {
+    setIsGenerating(false)
+    setAgentStatus("Ready")
+    
+    // Mark current study as completed
+    setCurrentStudy(prev => prev ? {
+      ...prev, 
+      status: 'completed' as const
+    } : null)
+  }
+
   const handleContentChange = (content: string) => {
     if (currentStudy) {
       setCurrentStudy(prev => prev ? { ...prev, content } : null)
@@ -166,6 +221,10 @@ export default function HomePage() {
           isGenerating={isGenerating}
           agentStatus={agentStatus}
           onSendMessage={handleSendMessage}
+          onProjectScopeUpdate={setProjectScope}
+          onStartGeneration={handleStartGeneration}
+          onStreamChunk={handleStreamChunk}
+          onGenerationComplete={handleGenerationComplete}
           onContentChange={handleContentChange}
           onSaveStudy={handleSaveStudy}
         />

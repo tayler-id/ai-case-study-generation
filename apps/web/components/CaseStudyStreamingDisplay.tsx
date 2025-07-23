@@ -194,7 +194,7 @@ export function CaseStudyStreamingDisplay({
               ~{stats.estimatedTokens} tokens
             </div>
             {isGenerating && (
-              <Badge variant="secondary" className="animate-pulse">
+              <Badge variant="secondary" className="animate-pulse-slow">
                 Generating...
               </Badge>
             )}
@@ -220,7 +220,7 @@ export function CaseStudyStreamingDisplay({
                       )}
                       <span className="text-sm font-medium">{section.name}</span>
                       {section.isActive && (
-                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse-slow" />
                       )}
                     </div>
                     <Button
@@ -272,7 +272,7 @@ export function CaseStudyStreamingDisplay({
                             <h2 className="flex items-center gap-2">
                               {section.name}
                               {section.isActive && (
-                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse-slow" />
                               )}
                             </h2>
                             <ReactMarkdown 

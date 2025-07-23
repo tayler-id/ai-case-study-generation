@@ -128,7 +128,7 @@ export function Canvas({
             <div className="p-6">
               {isGenerating ? (
                 <div className="space-y-4">
-                  <div className="animate-pulse">
+                  <div className="animate-pulse-slow">
                     <div className="h-8 bg-muted rounded w-3/4 mb-4"></div>
                     <div className="space-y-2">
                       <div className="h-4 bg-muted rounded w-full"></div>
@@ -136,7 +136,7 @@ export function Canvas({
                       <div className="h-4 bg-muted rounded w-4/5"></div>
                     </div>
                   </div>
-                  <div className="animate-pulse">
+                  <div className="animate-pulse-slow">
                     <div className="h-6 bg-muted rounded w-1/2 mb-3"></div>
                     <div className="space-y-2">
                       <div className="h-4 bg-muted rounded w-full"></div>

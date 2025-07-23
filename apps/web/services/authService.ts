@@ -26,6 +26,7 @@ export class AuthService {
           this.user = JSON.parse(userData)
         } catch (e) {
           // Invalid JSON, clear storage
+          console.log('Clearing invalid localStorage auth data')
           this.clearAuth()
         }
       }
@@ -34,13 +35,9 @@ export class AuthService {
       if (!this.user) {
         const userDataCookie = this.getCookie('user_data')
         if (userDataCookie) {
-          try {
-            this.user = JSON.parse(decodeURIComponent(userDataCookie))
-            if (this.user) {
-              localStorage.setItem('user_data', JSON.stringify(this.user))
-            }
-          } catch (e) {
-            console.error('Error parsing user data from cookie:', e)
+          this.user = this.parseUserDataFromCookie(userDataCookie)
+          if (this.user) {
+            localStorage.setItem('user_data', JSON.stringify(this.user))
           }
         }
       }
@@ -65,6 +62,27 @@ export class AuthService {
     if (parts.length === 2) {
       const cookieValue = parts.pop()?.split(';').shift()
       return cookieValue || null
+    }
+    return null
+  }
+
+  /**
+   * Safely parse user data from cookie
+   */
+  private parseUserDataFromCookie(cookieValue: string): User | null {
+    try {
+      // Handle URL encoding from backend
+      const decodedCookie = decodeURIComponent(cookieValue)
+      // Validate it looks like JSON
+      if (decodedCookie && decodedCookie.trim().startsWith('{') && decodedCookie.trim().endsWith('}')) {
+        return JSON.parse(decodedCookie)
+      }
+    } catch (e) {
+      console.error('Error parsing user data from cookie:', e, 'Cookie value:', cookieValue)
+      // Clear the invalid cookie
+      if (typeof document !== 'undefined') {
+        document.cookie = 'user_data=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
+      }
     }
     return null
   }
@@ -96,8 +114,8 @@ export class AuthService {
     // Check for user data in cookies (set by backend)
     const userDataCookie = this.getCookie('user_data')
     if (userDataCookie) {
-      try {
-        const userData = JSON.parse(decodeURIComponent(userDataCookie))
+      const userData = this.parseUserDataFromCookie(userDataCookie)
+      if (userData) {
         // Set user data
         this.user = userData
         
@@ -112,8 +130,7 @@ export class AuthService {
         }
         
         return { success: true }
-      } catch (e) {
-        console.error('Error parsing user data cookie:', e)
+      } else {
         return { success: false, error: 'Invalid authentication data' }
       }
     }
@@ -177,17 +194,26 @@ export class AuthService {
   }
 
   /**
-   * Fetch current user from API
+   * Fetch current user from API with timeout
    */
   async fetchCurrentUser(): Promise<User | null> {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/me`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include', // Include HTTP-only cookies
+      // Create a timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Request timeout')), 8000)
       })
+
+      // Race the fetch against the timeout
+      const response = await Promise.race([
+        fetch(`${API_BASE_URL}/auth/me`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include', // Include HTTP-only cookies
+        }),
+        timeoutPromise
+      ])
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -207,6 +233,11 @@ export class AuthService {
       return userData
     } catch (error) {
       console.error('Failed to fetch current user:', error)
+      // If it's a network error, try to use cached user data
+      if (error instanceof Error && error.message.includes('timeout') && this.user) {
+        console.log('Using cached user data due to network timeout')
+        return this.user
+      }
       return null
     }
   }

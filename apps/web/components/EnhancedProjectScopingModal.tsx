@@ -43,6 +43,7 @@ export interface ProjectScope {
   keywords: string[]
   industry: string
   focus: string
+  folders: string[]
 }
 
 export function EnhancedProjectScopingModal({ open, onOpenChange, onSubmit }: EnhancedProjectScopingModalProps) {
@@ -52,7 +53,8 @@ export function EnhancedProjectScopingModal({ open, onOpenChange, onSubmit }: En
     participants: [],
     keywords: [],
     industry: "",
-    focus: ""
+    focus: "",
+    folders: []
   })
 
   const [newParticipant, setNewParticipant] = useState("")
@@ -423,7 +425,7 @@ export function EnhancedProjectScopingModal({ open, onOpenChange, onSubmit }: En
                             {previewData.estimated_results.gmail.sample_count} emails found
                           </div>
                           <div className="space-y-1">
-                            {previewData.estimated_results.gmail.sample_subjects.slice(0, 3).map((subject, i) => (
+                            {(previewData.estimated_results.gmail.sample_subjects || []).slice(0, 3).map((subject, i) => (
                               <div key={i} className="text-xs bg-gray-50 p-1 rounded truncate">
                                 {subject}
                               </div>
@@ -440,7 +442,7 @@ export function EnhancedProjectScopingModal({ open, onOpenChange, onSubmit }: En
                             {previewData.estimated_results.drive.sample_count} documents found
                           </div>
                           <div className="space-y-1">
-                            {previewData.estimated_results.drive.sample_files.slice(0, 3).map((file, i) => (
+                            {(previewData.estimated_results.drive.sample_files || []).slice(0, 3).map((file, i) => (
                               <div key={i} className="text-xs bg-gray-50 p-1 rounded truncate flex items-center gap-1">
                                 <FileText className="w-3 h-3" />
                                 {file}
