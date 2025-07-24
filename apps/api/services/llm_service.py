@@ -379,6 +379,106 @@ class LLMService:
             
         return base_prompt
     
+    def _select_most_relevant_emails(self, emails: List[Dict], max_emails: int = 75, project_date_range: tuple = None) -> List[Dict]:
+        """
+        Select the most relevant emails for case study analysis
+        Prioritizes recent, important, threaded, and keyword-relevant emails
+        """
+        if not emails:
+            return []
+        
+        if len(emails) <= max_emails:
+            return emails
+        
+        # Score emails based on relevance criteria
+        scored_emails = []
+        
+        for email in emails:
+            score = 0
+            
+            # Date relevance scoring - balanced approach
+            try:
+                from datetime import datetime, timedelta
+                email_date = datetime.fromisoformat(email.get('date', '').replace('Z', '+00:00'))
+                
+                if project_date_range:
+                    # If we have a project date range, prioritize emails within that range
+                    start_date, end_date = project_date_range
+                    if start_date <= email_date <= end_date:
+                        score += 3  # In project range = bonus
+                        
+                        # Within project range, give slight preference to more recent
+                        total_range_days = (end_date - start_date).days
+                        if total_range_days > 0:
+                            days_from_end = (end_date - email_date).days
+                            recency_ratio = 1 - (days_from_end / total_range_days)
+                            score += int(recency_ratio * 2)  # 0-2 bonus for recency within range
+                    else:
+                        # Outside project range = penalty
+                        score -= 2
+                else:
+                    # Fallback: general recency scoring (more balanced)
+                    days_ago = (datetime.now().astimezone() - email_date).days
+                    if days_ago <= 7:
+                        score += 2  # Reduced from 5
+                    elif days_ago <= 30:
+                        score += 1  # Reduced from 3
+                    # Removed penalty for older emails
+            except:
+                pass
+            
+            # Important labels get higher scores
+            labels = email.get('labels', [])
+            if 'IMPORTANT' in labels:
+                score += 4
+            if 'STARRED' in labels:
+                score += 3
+            if 'CATEGORY_PROMOTIONS' not in labels and 'SPAM' not in labels:
+                score += 2
+            
+            # Emails with attachments are often more substantial
+            if email.get('attachments') and len(email.get('attachments', [])) > 0:
+                score += 2
+            
+            # Longer emails are often more substantial
+            body_length = len(email.get('body_text', ''))
+            if body_length > 1000:
+                score += 3
+            elif body_length > 500:
+                score += 2
+            elif body_length > 200:
+                score += 1
+            
+            # Emails in threads are often more important
+            thread_id = email.get('thread_id', '')
+            if thread_id:
+                # Count how many emails share this thread
+                thread_count = sum(1 for e in emails if e.get('thread_id') == thread_id)
+                if thread_count > 3:
+                    score += 3
+                elif thread_count > 1:
+                    score += 2
+            
+            # Internal emails (same domain) are often more relevant for case studies
+            sender = email.get('sender', '')
+            recipient = email.get('recipient', '')
+            if sender and recipient:
+                sender_domain = sender.split('@')[-1] if '@' in sender else ''
+                recipient_domain = recipient.split('@')[-1] if '@' in recipient else ''
+                if sender_domain == recipient_domain and sender_domain:
+                    score += 2
+            
+            scored_emails.append((score, email))
+        
+        # Sort by score (highest first) and take top emails
+        scored_emails.sort(key=lambda x: x[0], reverse=True)
+        selected = [email for score, email in scored_emails[:max_emails]]
+        
+        logger.info(f"   📊 Email selection scores: Top={scored_emails[0][0] if scored_emails else 0}, "
+                   f"Avg={sum(s for s, e in scored_emails[:max_emails]) / min(len(scored_emails), max_emails):.1f}")
+        
+        return selected
+    
     def _format_project_data(self, project_data: Dict[str, Any]) -> str:
         """Format project data for LLM consumption"""
         logger.info(f"🧠 Formatting project data for LLM consumption")
@@ -395,16 +495,42 @@ class LLMService:
             logger.info(f"   📧 Processing Gmail data: {total_emails} emails, {total_threads} threads")
             
             formatted_sections.append("## Email Communications")
-            formatted_sections.append(f"Total emails: {total_emails}")
-            formatted_sections.append(f"Conversations: {total_threads}")
+            formatted_sections.append(f"Total emails retrieved: {total_emails}")
+            formatted_sections.append(f"Total conversations: {total_threads}")
             
-            # Add sample emails (fix: use 'items' not 'emails')
-            emails = gmail_data.get('items', [])[:50]  # Increased to 50 for deeper analysis
-            logger.info(f"   📧 Including {len(emails)} sample emails in LLM context")
+            # Select most relevant emails for quality analysis (not quantity)
+            all_emails = gmail_data.get('items', [])
             
-            for i, email in enumerate(emails):
+            # Extract project date range from Gmail metadata
+            project_date_range = None
+            date_range_info = gmail_data.get('metadata', {}).get('date_range', {})
+            if date_range_info.get('start') and date_range_info.get('end'):
+                try:
+                    from datetime import datetime
+                    start_date = datetime.fromisoformat(date_range_info['start'].replace('Z', '+00:00'))
+                    end_date = datetime.fromisoformat(date_range_info['end'].replace('Z', '+00:00'))
+                    project_date_range = (start_date, end_date)
+                    logger.info(f"   📅 Project date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+                except:
+                    logger.warning("   ⚠️  Could not parse project date range from metadata")
+            
+            # Smart email selection for better case study quality
+            selected_emails = self._select_most_relevant_emails(all_emails, max_emails=75, project_date_range=project_date_range)
+            
+            formatted_sections.append(f"Selected for detailed analysis: {len(selected_emails)} most relevant emails")
+            if project_date_range:
+                formatted_sections.append("(Prioritized within project date range by importance, thread activity, and content depth)")
+            else:
+                formatted_sections.append("(Prioritized by recency, importance, thread activity, and content depth)")
+            
+            logger.info(f"   📧 Email Selection Summary:")
+            logger.info(f"      - Total emails retrieved: {len(all_emails)}")
+            logger.info(f"      - Selected for analysis: {len(selected_emails)} (optimized for quality)")
+            logger.info(f"      - Selection criteria: Recent, important, threaded, keyword-relevant")
+            
+            for i, email in enumerate(selected_emails):
                 # Extract more comprehensive email details for analysis
-                body_text = email.get('body_text', '')[:2000]  # Increased from 1000 to 2000 chars
+                body_text = email.get('body_text', '')[:2000]  # Balanced length for quality analysis
                 recipient = email.get('recipient', 'Unknown')
                 labels = ', '.join(email.get('labels', []))
                 attachments = len(email.get('attachments', []))

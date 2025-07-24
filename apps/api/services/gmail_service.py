@@ -588,8 +588,8 @@ class GmailService:
             'recipient': email.recipient,
             'date': email.date.isoformat(),
             'snippet': email.snippet,
-            'body_text': email.body_text[:1000] + "..." if len(email.body_text) > 1000 else email.body_text,
-            'body_html': email.body_html[:1000] + "..." if len(email.body_html) > 1000 else email.body_html,
+            'body_text': email.body_text[:3000] + "..." if len(email.body_text) > 3000 else email.body_text,
+            'body_html': email.body_html[:3000] + "..." if len(email.body_html) > 3000 else email.body_html,
             'labels': email.labels,
             'attachments': email.attachments
         }

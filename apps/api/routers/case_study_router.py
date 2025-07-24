@@ -89,7 +89,7 @@ async def generate_case_study_stream(
     session: Session = Depends(get_session)
 ):
     """
-    Generate case study with real-time streaming (for direct streaming without background tasks)
+    Generate case study with real-time streaming and save to database
     """
     logger.info(f"🎬 Starting streaming case study generation for user {current_user['email']}")
     logger.info(f"   Project: {request.project_name}")
@@ -98,6 +98,29 @@ async def generate_case_study_stream(
     logger.info(f"   Date range: {request.date_range_start} to {request.date_range_end}")
     logger.info(f"   Model: {request.model_name}")
     logger.info(f"   Template: {request.template_type}")
+    
+    # Create case study record for saving
+    case_study = CaseStudy(
+        user_id=uuid.UUID(current_user['id']),
+        project_name=request.project_name,
+        project_industry=request.project_industry,
+        project_focus=request.project_focus,
+        template_type=request.template_type,
+        model_used=request.model_name,
+        custom_instructions=request.custom_instructions,
+        date_range_start=request.date_range_start,
+        date_range_end=request.date_range_end,
+        participants=request.participants,
+        keywords=request.keywords,
+        status=CaseStudyStatus.GENERATING,
+        started_at=datetime.utcnow()
+    )
+    
+    session.add(case_study)
+    session.commit()
+    session.refresh(case_study)
+    
+    logger.info(f"📝 Created case study record with ID: {case_study.id}")
     
     try:
         # Get project data first
@@ -110,17 +133,73 @@ async def generate_case_study_stream(
             "end_date": request.date_range_end.isoformat()
         }, uuid.UUID(current_user['id']), session)
         
+        # Extract email count information for UI display
+        gmail_data = project_data.get('data', {}).get('gmail', {})
+        email_count = len(gmail_data.get('items', [])) if gmail_data else 0
+        total_emails_metadata = gmail_data.get('metadata', {}).get('total_emails', 0) if gmail_data else 0
+        
+        logger.info(f"📧 Email processing summary: {email_count} emails retrieved for case study generation")
+        logger.info(f"📧 Total emails found in search: {total_emails_metadata}")
+        
         # Generate case study with streaming
         llm_service = get_llm_service()
         
         async def stream_generator():
+            full_content = ""
+            sections_content = {}
+            current_section = None
+            
             try:
+                # First, send email count metadata to the UI
+                email_list = gmail_data.get('items', []) if gmail_data else []
+                # Create summary of emails for UI display (first 50 for performance)
+                email_summaries = []
+                for i, email in enumerate(email_list[:50]):  # Show first 50 in UI
+                    email_summaries.append({
+                        "id": i + 1,
+                        "subject": email.get('subject', 'No Subject'),
+                        "sender": email.get('sender', 'Unknown'),
+                        "recipient": email.get('recipient', 'Unknown'),
+                        "date": email.get('date', ''),
+                        "snippet": email.get('snippet', '')[:100] + "..." if len(email.get('snippet', '')) > 100 else email.get('snippet', ''),
+                        "labels": email.get('labels', []),
+                        "attachments": len(email.get('attachments', []))
+                    })
+                
+                email_metadata = {
+                    "type": "metadata",
+                    "content": f"📧 Processing {email_count} emails for case study analysis",
+                    "section": "data_summary",
+                    "metadata": {
+                        "emails_retrieved": email_count,
+                        "total_emails_found": total_emails_metadata,
+                        "gmail_connected": gmail_data is not None,
+                        "email_list": email_summaries,
+                        "showing_count": min(50, len(email_list)),
+                        "case_study_id": case_study.id  # Include case study ID for saving
+                    },
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                yield {
+                    "event": "chunk",
+                    "data": json.dumps(email_metadata)
+                }
+                
                 async for chunk in llm_service.generate_case_study_stream(
                     project_data=project_data,
                     model_name=request.model_name,
                     case_study_template=request.template_type.value,
                     custom_instructions=request.custom_instructions
                 ):
+                    # Track content for saving
+                    if chunk.chunk_type == "section_start":
+                        current_section = chunk.section_name
+                        sections_content[current_section] = ""
+                    elif chunk.chunk_type == "content" and current_section:
+                        sections_content[current_section] += chunk.content
+                        full_content += chunk.content
+                    
                     # Convert chunk to SSE format
                     event_data = {
                         "type": chunk.chunk_type,
@@ -137,8 +216,55 @@ async def generate_case_study_stream(
                     
                     # Small delay to prevent overwhelming the client
                     await asyncio.sleep(0.01)
+                
+                # Save completed case study to database
+                case_study.full_content = full_content
+                case_study.status = CaseStudyStatus.COMPLETED
+                case_study.completed_at = datetime.utcnow()
+                case_study.progress_percentage = 100
+                
+                # Extract executive summary and insights (basic implementation)
+                if "Executive Summary" in sections_content:
+                    case_study.executive_summary = sections_content["Executive Summary"]
+                
+                # Save generation metadata
+                case_study.generation_metadata = {
+                    "total_sections": len(sections_content),
+                    "data_sources": ["gmail"] if gmail_data else [],
+                    "emails_processed": email_count,
+                    "generation_time_seconds": (datetime.utcnow() - case_study.started_at).total_seconds()
+                }
+                
+                session.add(case_study)
+                session.commit()
+                
+                logger.info(f"✅ Case study {case_study.id} completed and saved")
+                
+                # Send completion metadata
+                completion_metadata = {
+                    "type": "metadata",
+                    "content": f"✅ Case study saved to dashboard",
+                    "section": "completion",
+                    "metadata": {
+                        "case_study_id": case_study.id,
+                        "generation_complete": True,
+                        "saved_to_dashboard": True
+                    },
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                yield {
+                    "event": "chunk",
+                    "data": json.dumps(completion_metadata)
+                }
                     
             except Exception as e:
+                # Mark case study as failed
+                case_study.status = CaseStudyStatus.FAILED
+                case_study.generation_metadata = {"error": str(e)}
+                session.add(case_study)
+                session.commit()
+                
                 logger.error(f"Error in streaming generation: {str(e)}")
                 yield {
                     "event": "error", 

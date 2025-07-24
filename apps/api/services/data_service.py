@@ -127,6 +127,18 @@ class UnifiedDataService:
                     logger.info(f"   ✅ Service {service_name} completed in {service_duration:.2f}s")
                     logger.info(f"   📊 Items fetched: {project_data.total_items}")
                     
+                    # Add detailed email logging for Gmail service
+                    if service_name == "gmail" and project_data.items:
+                        logger.info(f"   📧 Gmail Email Count Details:")
+                        logger.info(f"      - Total emails retrieved: {len(project_data.items)}")
+                        logger.info(f"      - Max results requested: {scope.get('max_results', 500)}")
+                        logger.info(f"      - Date range: {scope['start_date']} to {scope['end_date']}")
+                        if project_data.items:
+                            logger.info(f"      - First email: '{project_data.items[0].get('subject', 'No Subject')[:50]}...'")
+                            logger.info(f"      - Last email: '{project_data.items[-1].get('subject', 'No Subject')[:50]}...'")
+                    elif service_name == "gmail":
+                        logger.warning(f"   ⚠️  Gmail service returned no emails")
+                    
                     # Log sample items if available
                     if project_data.items and len(project_data.items) > 0:
                         sample_item = project_data.items[0]

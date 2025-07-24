@@ -121,6 +121,12 @@ export function CaseStudyGenerator() {
       await caseStudyService.generateStreaming(
         request,
         (chunk) => {
+          // Debug: Log all chunks to see what's coming through
+          console.log('📊 Received chunk:', chunk)
+          if (chunk.type === 'metadata') {
+            console.log('📧 Email metadata:', chunk.metadata)
+          }
+          
           setStreamedContent(prev => [...prev, chunk])
           
           // Update progress based on chunk type

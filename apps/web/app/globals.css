@@ -66,6 +66,15 @@ body {
   }
 }
 
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes typing {
   0% {
     width: 0;
@@ -85,7 +94,11 @@ body {
 }
 
 .animate-pulse-slow {
-  animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: pulse-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
 }
 
 .animate-typing {
@@ -93,7 +106,7 @@ body {
 }
 
 .animate-bounce-slow {
-  animation: bounce-slow 2s infinite;
+  animation: bounce-slow 3s infinite;
 }
 
 /* Markdown styling */
