@@ -17,6 +17,7 @@ interface CanvasProps {
   title?: string
   streamingContent?: string
   isStreaming?: boolean
+  caseStudyId?: string
 }
 
 export function Canvas({ 
@@ -26,12 +27,19 @@ export function Canvas({
   onSave,
   title = "Case Study Analysis",
   streamingContent = "",
-  isStreaming = false
+  isStreaming = false,
+  caseStudyId
 }: CanvasProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [markdownContent, setMarkdownContent] = useState(content)
-  const [rating, setRating] = useState(0)
-  const [hoverRating, setHoverRating] = useState(0)
+  const [accuracyRating, setAccuracyRating] = useState(0)
+  const [hoverAccuracyRating, setHoverAccuracyRating] = useState(0)
+  const [usefulnessRating, setUsefulnessRating] = useState(0)
+  const [hoverUsefulnessRating, setHoverUsefulnessRating] = useState(0)
+  const [evaluationComment, setEvaluationComment] = useState("")
+  const [isSubmittingEvaluation, setIsSubmittingEvaluation] = useState(false)
+  const [evaluationSubmitted, setEvaluationSubmitted] = useState(false)
+  const [evaluationError, setEvaluationError] = useState<string | null>(null)
 
   // Initialize content from props
   useEffect(() => {
@@ -51,7 +59,35 @@ export function Canvas({
       setMarkdownContent(streamingContent)
       onContentChange?.(streamingContent)
     }
-  }, [isStreaming, streamingContent])
+  }, [isStreaming, streamingContent, onContentChange])
+
+  // Load existing evaluation when case study changes
+  useEffect(() => {
+    const loadExistingEvaluation = async () => {
+      if (!caseStudyId) return
+
+      try {
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001'
+        
+        const response = await fetch(`${API_BASE_URL}/case-study/${caseStudyId}/evaluation`, {
+          credentials: 'include' // Use HTTP-only cookies for authentication
+        })
+
+        if (response.ok) {
+          const evaluation = await response.json()
+          if (evaluation) {
+            setAccuracyRating(evaluation.accuracy_rating || 0)
+            setUsefulnessRating(evaluation.usefulness_rating || 0)
+            setEvaluationComment(evaluation.comment || "")
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load existing evaluation:', error)
+      }
+    }
+
+    loadExistingEvaluation()
+  }, [caseStudyId])
 
   const handleSave = () => {
     setIsEditing(false)
@@ -71,8 +107,53 @@ export function Canvas({
     URL.revokeObjectURL(url)
   }
 
-  const handleRating = (value: number) => {
-    setRating(value)
+  const handleAccuracyRating = (value: number) => {
+    setAccuracyRating(value)
+  }
+
+  const handleUsefulnessRating = (value: number) => {
+    setUsefulnessRating(value)
+  }
+
+  const handleSubmitEvaluation = async () => {
+    if (!caseStudyId) {
+      setEvaluationError("Case study ID not available")
+      return
+    }
+
+    setIsSubmittingEvaluation(true)
+    setEvaluationError(null)
+
+    try {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001'
+      
+      const response = await fetch(`${API_BASE_URL}/case-study/${caseStudyId}/evaluation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Use HTTP-only cookies for authentication
+        body: JSON.stringify({
+          accuracy_rating: accuracyRating || null,
+          usefulness_rating: usefulnessRating || null,
+          comment: evaluationComment || null
+        })
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Not authenticated - please log in again')
+        }
+        throw new Error('Failed to submit evaluation')
+      }
+
+      setEvaluationSubmitted(true)
+      setTimeout(() => setEvaluationSubmitted(false), 3000) // Reset after 3 seconds
+    } catch (error) {
+      setEvaluationError(error instanceof Error ? error.message : 'Failed to submit evaluation')
+    } finally {
+      setIsSubmittingEvaluation(false)
+    }
   }
 
   return (
@@ -212,15 +293,16 @@ export function Canvas({
       {/* Footer - Rating Section */}
       {!isGenerating && !isStreaming && markdownContent && (
         <div className="p-6 border-t border-border">
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
+          <Card className="p-6">
+            <div className="space-y-4">
               <div>
                 <h4 className="font-medium text-foreground mb-1">Rate this case study</h4>
                 <p className="text-sm text-muted-foreground">
                   Help us improve by rating the accuracy and usefulness
                 </p>
               </div>
-              <div className="flex items-center gap-4">
+              
+              <div className="flex items-center gap-6">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Accuracy:</span>
                   <div className="flex items-center gap-1">
@@ -228,13 +310,13 @@ export function Canvas({
                       <Star
                         key={i}
                         className={`w-5 h-5 cursor-pointer transition-colors ${
-                          i < (hoverRating || rating)
+                          i < (hoverAccuracyRating || accuracyRating)
                             ? 'fill-yellow-400 text-yellow-400'
                             : 'text-gray-300 hover:text-yellow-400'
                         }`}
-                        onMouseEnter={() => setHoverRating(i + 1)}
-                        onMouseLeave={() => setHoverRating(0)}
-                        onClick={() => handleRating(i + 1)}
+                        onMouseEnter={() => setHoverAccuracyRating(i + 1)}
+                        onMouseLeave={() => setHoverAccuracyRating(0)}
+                        onClick={() => handleAccuracyRating(i + 1)}
                       />
                     ))}
                   </div>
@@ -246,17 +328,51 @@ export function Canvas({
                       <Star
                         key={i}
                         className={`w-5 h-5 cursor-pointer transition-colors ${
-                          i < (hoverRating || rating)
+                          i < (hoverUsefulnessRating || usefulnessRating)
                             ? 'fill-blue-400 text-blue-400'
                             : 'text-gray-300 hover:text-blue-400'
                         }`}
-                        onMouseEnter={() => setHoverRating(i + 1)}
-                        onMouseLeave={() => setHoverRating(0)}
-                        onClick={() => handleRating(i + 1)}
+                        onMouseEnter={() => setHoverUsefulnessRating(i + 1)}
+                        onMouseLeave={() => setHoverUsefulnessRating(0)}
+                        onClick={() => handleUsefulnessRating(i + 1)}
                       />
                     ))}
                   </div>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Comments (optional)
+                </label>
+                <Textarea
+                  value={evaluationComment}
+                  onChange={(e) => setEvaluationComment(e.target.value)}
+                  placeholder="Share your thoughts about this case study..."
+                  className="min-h-[80px] resize-none"
+                />
+              </div>
+
+              <div className="flex justify-between items-center">
+                <div className="flex-1">
+                  {evaluationError && (
+                    <p className="text-sm text-red-500">{evaluationError}</p>
+                  )}
+                  {evaluationSubmitted && (
+                    <p className="text-sm text-green-600">Evaluation submitted successfully!</p>
+                  )}
+                </div>
+                <Button 
+                  onClick={handleSubmitEvaluation}
+                  size="sm"
+                  disabled={
+                    isSubmittingEvaluation || 
+                    (accuracyRating === 0 && usefulnessRating === 0) ||
+                    !caseStudyId
+                  }
+                >
+                  {isSubmittingEvaluation ? "Submitting..." : "Submit Evaluation"}
+                </Button>
               </div>
             </div>
           </Card>

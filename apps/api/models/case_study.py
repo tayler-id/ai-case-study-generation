@@ -144,6 +144,45 @@ class CaseStudyResponse(SQLModel):
     # Metadata
     generation_metadata: Dict[str, Any] = Field(default_factory=dict)
 
+class CaseStudyEvaluation(SQLModel, table=True):
+    """Evaluation/rating data for case studies"""
+    __tablename__ = "case_study_evaluations"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    case_study_id: int = Field(foreign_key="case_studies.id")
+    user_id: uuid.UUID = Field(foreign_key="user.id")
+    
+    # Ratings (1-5 scale)
+    accuracy_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    usefulness_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    
+    # Qualitative feedback
+    comment: Optional[str] = Field(default=None, sa_column=Column(Text))
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Relationships
+    case_study: "CaseStudy" = Relationship()
+    user: "User" = Relationship()
+
+class CaseStudyEvaluationRequest(SQLModel):
+    """Request model for submitting case study evaluation"""
+    accuracy_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    usefulness_rating: Optional[int] = Field(default=None, ge=1, le=5)
+    comment: Optional[str] = Field(default=None, max_length=2000)
+
+class CaseStudyEvaluationResponse(SQLModel):
+    """Response model for case study evaluation"""
+    id: int
+    case_study_id: int
+    accuracy_rating: Optional[int]
+    usefulness_rating: Optional[int]
+    comment: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
 class CaseStudyStreamEvent(SQLModel):
     """Streaming event model for real-time updates"""
     case_study_id: int

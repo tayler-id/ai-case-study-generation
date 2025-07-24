@@ -23,7 +23,10 @@ from models.case_study import (
     CaseStudyGenerationRequest, 
     CaseStudyResponse,
     CaseStudyStatus,
-    CaseStudyStreamEvent
+    CaseStudyStreamEvent,
+    CaseStudyEvaluation,
+    CaseStudyEvaluationRequest,
+    CaseStudyEvaluationResponse
 )
 from services.llm_service import get_llm_service
 from services.data_service import get_data_service
@@ -196,9 +199,15 @@ async def generate_case_study_stream(
                     if chunk.chunk_type == "section_start":
                         current_section = chunk.section_name
                         sections_content[current_section] = ""
-                    elif chunk.chunk_type == "content" and current_section:
-                        sections_content[current_section] += chunk.content
+                    elif chunk.chunk_type == "content":
+                        # Always accumulate full content regardless of section  
                         full_content += chunk.content
+                        # Also accumulate in current section if we have one
+                        if current_section:
+                            sections_content[current_section] += chunk.content
+                        # Log content accumulation periodically
+                        if len(full_content) % 500 == 0:  # Log every 500 characters
+                            logger.info(f"📄 Content accumulated: {len(full_content)} characters")
                     
                     # Convert chunk to SSE format
                     event_data = {
@@ -218,6 +227,7 @@ async def generate_case_study_stream(
                     await asyncio.sleep(0.01)
                 
                 # Save completed case study to database
+                logger.info(f"📝 Saving case study with content length: {len(full_content)} characters")
                 case_study.full_content = full_content
                 case_study.status = CaseStudyStatus.COMPLETED
                 case_study.completed_at = datetime.utcnow()
@@ -544,3 +554,181 @@ def _extract_list_items(lines: List[str], *section_names: str) -> List[str]:
                 items.append(item)
     
     return items
+
+# Evaluation endpoints
+
+@router.post("/{case_study_id}/evaluation")
+async def submit_case_study_evaluation(
+    case_study_id: int,
+    evaluation_request: CaseStudyEvaluationRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+) -> CaseStudyEvaluationResponse:
+    """Submit or update evaluation for a case study"""
+    
+    # Verify case study exists and belongs to user
+    case_study = session.get(CaseStudy, case_study_id)
+    if not case_study or case_study.user_id != uuid.UUID(current_user['id']):
+        raise HTTPException(status_code=404, detail="Case study not found")
+    
+    # Check if evaluation already exists for this user and case study
+    existing_evaluation = session.exec(
+        select(CaseStudyEvaluation)
+        .where(CaseStudyEvaluation.case_study_id == case_study_id)
+        .where(CaseStudyEvaluation.user_id == uuid.UUID(current_user['id']))
+    ).first()
+    
+    if existing_evaluation:
+        # Update existing evaluation
+        if evaluation_request.accuracy_rating is not None:
+            existing_evaluation.accuracy_rating = evaluation_request.accuracy_rating
+        if evaluation_request.usefulness_rating is not None:
+            existing_evaluation.usefulness_rating = evaluation_request.usefulness_rating
+        if evaluation_request.comment is not None:
+            existing_evaluation.comment = evaluation_request.comment
+        existing_evaluation.updated_at = datetime.utcnow()
+        
+        session.add(existing_evaluation)
+        session.commit()
+        session.refresh(existing_evaluation)
+        evaluation = existing_evaluation
+    else:
+        # Create new evaluation
+        evaluation = CaseStudyEvaluation(
+            case_study_id=case_study_id,
+            user_id=uuid.UUID(current_user['id']),
+            accuracy_rating=evaluation_request.accuracy_rating,
+            usefulness_rating=evaluation_request.usefulness_rating,
+            comment=evaluation_request.comment
+        )
+        
+        session.add(evaluation)
+        session.commit()
+        session.refresh(evaluation)
+    
+    return CaseStudyEvaluationResponse(
+        id=evaluation.id,
+        case_study_id=evaluation.case_study_id,
+        accuracy_rating=evaluation.accuracy_rating,
+        usefulness_rating=evaluation.usefulness_rating,
+        comment=evaluation.comment,
+        created_at=evaluation.created_at,
+        updated_at=evaluation.updated_at
+    )
+
+@router.get("/evaluations/all")
+async def get_all_evaluations(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    limit: int = 100,
+    offset: int = 0
+) -> List[Dict[str, Any]]:
+    """Get all evaluations with case study details (admin view)"""
+    
+    # Get evaluations with case study information
+    statement = (
+        select(CaseStudyEvaluation, CaseStudy.project_name, CaseStudy.created_at.label('case_study_created'))
+        .join(CaseStudy, CaseStudyEvaluation.case_study_id == CaseStudy.id)
+        .where(CaseStudy.user_id == uuid.UUID(current_user['id']))  # Only user's own case studies
+        .order_by(CaseStudyEvaluation.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    
+    results = session.exec(statement).all()
+    
+    evaluations = []
+    for evaluation, project_name, case_study_created in results:
+        evaluations.append({
+            "id": evaluation.id,
+            "case_study_id": evaluation.case_study_id,
+            "project_name": project_name,
+            "accuracy_rating": evaluation.accuracy_rating,
+            "usefulness_rating": evaluation.usefulness_rating,
+            "comment": evaluation.comment,
+            "evaluation_created_at": evaluation.created_at,
+            "case_study_created_at": case_study_created
+        })
+    
+    return evaluations
+
+@router.get("/evaluations/stats")
+async def get_evaluation_stats(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+) -> Dict[str, Any]:
+    """Get evaluation statistics for the user's case studies"""
+    
+    # Get all evaluations for user's case studies
+    statement = (
+        select(CaseStudyEvaluation)
+        .join(CaseStudy, CaseStudyEvaluation.case_study_id == CaseStudy.id)
+        .where(CaseStudy.user_id == uuid.UUID(current_user['id']))
+    )
+    
+    evaluations = session.exec(statement).all()
+    
+    if not evaluations:
+        return {
+            "total_evaluations": 0,
+            "average_accuracy": 0,
+            "average_usefulness": 0,
+            "accuracy_distribution": {},
+            "usefulness_distribution": {},
+            "has_comments": 0
+        }
+    
+    # Calculate statistics
+    accuracy_ratings = [e.accuracy_rating for e in evaluations if e.accuracy_rating is not None]
+    usefulness_ratings = [e.usefulness_rating for e in evaluations if e.usefulness_rating is not None]
+    
+    accuracy_dist = {}
+    usefulness_dist = {}
+    
+    for rating in accuracy_ratings:
+        accuracy_dist[rating] = accuracy_dist.get(rating, 0) + 1
+    
+    for rating in usefulness_ratings:
+        usefulness_dist[rating] = usefulness_dist.get(rating, 0) + 1
+    
+    return {
+        "total_evaluations": len(evaluations),
+        "average_accuracy": sum(accuracy_ratings) / len(accuracy_ratings) if accuracy_ratings else 0,
+        "average_usefulness": sum(usefulness_ratings) / len(usefulness_ratings) if usefulness_ratings else 0,
+        "accuracy_distribution": accuracy_dist,
+        "usefulness_distribution": usefulness_dist,
+        "has_comments": len([e for e in evaluations if e.comment and e.comment.strip()])
+    }
+
+@router.get("/{case_study_id}/evaluation")
+async def get_case_study_evaluation(
+    case_study_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+) -> Optional[CaseStudyEvaluationResponse]:
+    """Get existing evaluation for a case study by the current user"""
+    
+    # Verify case study exists and belongs to user
+    case_study = session.get(CaseStudy, case_study_id)
+    if not case_study or case_study.user_id != uuid.UUID(current_user['id']):
+        raise HTTPException(status_code=404, detail="Case study not found")
+    
+    # Get evaluation
+    evaluation = session.exec(
+        select(CaseStudyEvaluation)
+        .where(CaseStudyEvaluation.case_study_id == case_study_id)
+        .where(CaseStudyEvaluation.user_id == uuid.UUID(current_user['id']))
+    ).first()
+    
+    if not evaluation:
+        return None
+    
+    return CaseStudyEvaluationResponse(
+        id=evaluation.id,
+        case_study_id=evaluation.case_study_id,
+        accuracy_rating=evaluation.accuracy_rating,
+        usefulness_rating=evaluation.usefulness_rating,
+        comment=evaluation.comment,
+        created_at=evaluation.created_at,
+        updated_at=evaluation.updated_at
+    )

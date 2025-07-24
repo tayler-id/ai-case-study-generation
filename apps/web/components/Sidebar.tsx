@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { LayoutDashboard, PlusSquare, Settings, LogOut, User } from "lucide-react"
+import { LayoutDashboard, PlusSquare, Settings, LogOut, User, BarChart3 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ProjectScopingModal, ProjectScope } from "@/components/ProjectScopingModal"
+import { EnhancedProjectScopingModal, ProjectScope as EnhancedProjectScope } from "@/components/EnhancedProjectScopingModal"
+import { ProjectScope } from "@/components/ProjectScopingModal"
 
 interface User {
   name: string
@@ -12,8 +13,8 @@ interface User {
 
 interface SidebarProps {
   onCreateNewStudy: (scope: ProjectScope) => void
-  currentView: 'dashboard' | 'study'
-  onViewChange: (view: 'dashboard' | 'study') => void
+  currentView: 'dashboard' | 'study' | 'evaluations'
+  onViewChange: (view: 'dashboard' | 'study' | 'evaluations') => void
   user: User
   onSignOut: () => void
 }
@@ -25,8 +26,17 @@ export function Sidebar({ onCreateNewStudy, currentView, onViewChange, user, onS
     setShowScopingModal(true)
   }
 
-  const handleScopeSubmit = (scope: ProjectScope) => {
-    onCreateNewStudy(scope)
+  const handleScopeSubmit = (scope: EnhancedProjectScope, _previewData?: unknown) => {
+    // Convert enhanced scope to basic scope interface
+    const basicScope: ProjectScope = {
+      dateRange: scope.dateRange,
+      participants: scope.participants,
+      keywords: scope.keywords,
+      folders: scope.folders,
+      industry: scope.industry,
+      focus: scope.focus
+    }
+    onCreateNewStudy(basicScope)
     onViewChange('study')
   }
 
@@ -57,6 +67,18 @@ export function Sidebar({ onCreateNewStudy, currentView, onViewChange, user, onS
             >
               <LayoutDashboard className="w-5 h-5" />
               <span>Dashboard</span>
+            </Button>
+            <Button
+              variant="ghost"
+              className={`w-full justify-start gap-3 ${
+                currentView === 'evaluations' 
+                  ? 'bg-slate-800 text-slate-50' 
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-50'
+              }`}
+              onClick={() => onViewChange('evaluations')}
+            >
+              <BarChart3 className="w-5 h-5" />
+              <span>Evaluations</span>
             </Button>
             <Button
               variant="ghost"
@@ -102,7 +124,7 @@ export function Sidebar({ onCreateNewStudy, currentView, onViewChange, user, onS
         </div>
       </div>
 
-      <ProjectScopingModal
+      <EnhancedProjectScopingModal
         open={showScopingModal}
         onOpenChange={setShowScopingModal}
         onSubmit={handleScopeSubmit}

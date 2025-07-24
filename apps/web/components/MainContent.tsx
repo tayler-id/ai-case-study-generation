@@ -78,6 +78,7 @@ export function MainContent({
             title={currentStudy?.title || "Case Study Analysis"}
             streamingContent={streamingContent}
             isStreaming={isStreaming}
+            caseStudyId={currentStudy?.id}
           />
         </ResizablePanel>
       </ResizablePanelGroup>

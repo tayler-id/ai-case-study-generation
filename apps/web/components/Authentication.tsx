@@ -7,7 +7,7 @@ import { Loader, Shield, CheckCircle } from "lucide-react"
 import { useAuthStore } from "@/stores/useAuthStore"
 
 interface AuthenticationProps {
-  onAuthenticated: (user: { name: string; email: string }) => void
+  onAuthenticated?: (user: { name: string; email: string }) => void
 }
 
 export function Authentication({ onAuthenticated }: AuthenticationProps) {
