@@ -1,76 +1,46 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search, Calendar, Users, Star, FileText, Clock } from "lucide-react"
+import { Search, Calendar, Users, FileText, Clock, AlertCircle } from "lucide-react"
 import { ConnectionStatus } from "@/components/ConnectionStatus"
-
-interface CaseStudy {
-  id: string
-  title: string
-  dateCreated: string
-  dateRange: {
-    start: string
-    end: string
-  }
-  participants: string[]
-  keywords: string[]
-  rating: number
-  status: 'completed' | 'in-progress' | 'draft'
-  summary: string
-}
+import { caseStudyService, CaseStudyResponse } from "@/services/caseStudyService"
 
 interface DashboardProps {
-  onSelectStudy: (study: CaseStudy) => void
+  onSelectStudy: (study: CaseStudyResponse) => void
 }
 
 export function Dashboard({ onSelectStudy }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState("")
-  const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'in-progress' | 'draft'>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'pending' | 'generating' | 'failed'>('all')
+  const [studies, setStudies] = useState<CaseStudyResponse[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Mock data - in real app this would come from API
-  const [studies] = useState<CaseStudy[]>([
-    {
-      id: '1',
-      title: 'Q2 Product Launch Analysis',
-      dateCreated: '2024-07-15',
-      dateRange: { start: '2024-04-01', end: '2024-06-30' },
-      participants: ['john@company.com', 'sarah@company.com', 'mike@company.com'],
-      keywords: ['product launch', 'marketing', 'user acquisition'],
-      rating: 5,
-      status: 'completed',
-      summary: 'Comprehensive analysis of Q2 product launch performance, including user acquisition metrics and retention rates.'
-    },
-    {
-      id: '2',
-      title: 'Marketing Campaign Retrospective',
-      dateCreated: '2024-07-10',
-      dateRange: { start: '2024-05-01', end: '2024-06-15' },
-      participants: ['lisa@company.com', 'tom@company.com'],
-      keywords: ['marketing', 'campaign', 'social media'],
-      rating: 4,
-      status: 'completed',
-      summary: 'Analysis of social media marketing campaign effectiveness and ROI across multiple channels.'
-    },
-    {
-      id: '3',
-      title: 'Customer Support Process Review',
-      dateCreated: '2024-07-08',
-      dateRange: { start: '2024-06-01', end: '2024-06-30' },
-      participants: ['anna@company.com', 'david@company.com'],
-      keywords: ['customer support', 'process improvement', 'satisfaction'],
-      rating: 0,
-      status: 'in-progress',
-      summary: 'Ongoing review of customer support processes and satisfaction metrics for June 2024.'
+  // Fetch case studies from API
+  useEffect(() => {
+    const fetchStudies = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const fetchedStudies = await caseStudyService.listCaseStudies()
+        setStudies(fetchedStudies)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load case studies')
+      } finally {
+        setLoading(false)
+      }
     }
-  ])
+
+    fetchStudies()
+  }, [])
 
   const filteredStudies = studies.filter(study => {
-    const matchesSearch = study.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         study.keywords.some(keyword => keyword.toLowerCase().includes(searchQuery.toLowerCase()))
+    const matchesSearch = study.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         (study.executive_summary && study.executive_summary.toLowerCase().includes(searchQuery.toLowerCase()))
     const matchesFilter = filterStatus === 'all' || study.status === filterStatus
     return matchesSearch && matchesFilter
   })
@@ -78,24 +48,14 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
-      case 'in-progress': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
-      case 'draft': return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300'
+      case 'generating': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
+      case 'pending': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300'
+      case 'failed': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+      case 'cancelled': return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300'
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300'
     }
   }
 
-  const renderStars = (rating: number) => {
-    return Array.from({ length: 5 }, (_, i) => (
-      <Star
-        key={i}
-        className={`w-4 h-4 ${
-          i < rating 
-            ? 'fill-yellow-400 text-yellow-400' 
-            : 'text-gray-300 dark:text-gray-600'
-        }`}
-      />
-    ))
-  }
 
   return (
     <div className="h-full bg-background flex flex-col">
@@ -124,7 +84,7 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
             />
           </div>
           <div className="flex gap-2">
-            {(['all', 'completed', 'in-progress', 'draft'] as const).map((status) => (
+            {(['all', 'completed', 'generating', 'pending', 'failed'] as const).map((status) => (
               <Button
                 key={status}
                 variant={filterStatus === status ? "default" : "outline"}
@@ -132,7 +92,7 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
                 onClick={() => setFilterStatus(status)}
                 className="capitalize"
               >
-                {status === 'all' ? 'All' : status.replace('-', ' ')}
+                {status === 'all' ? 'All' : status}
               </Button>
             ))}
           </div>
@@ -148,7 +108,25 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
 
       {/* Studies Grid */}
       <div className="flex-1 p-6 overflow-y-auto">
-        {filteredStudies.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <Clock className="w-12 h-12 text-muted-foreground mb-4 animate-spin" />
+            <h3 className="text-lg font-medium text-foreground mb-2">Loading case studies...</h3>
+            <p className="text-muted-foreground">Fetching your data from the server</p>
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-2">Error loading case studies</h3>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button 
+              onClick={() => window.location.reload()} 
+              variant="outline"
+            >
+              Retry
+            </Button>
+          </div>
+        ) : filteredStudies.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <FileText className="w-12 h-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium text-foreground mb-2">No studies found</h3>
@@ -167,51 +145,48 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
                 <div className="space-y-4">
                   {/* Header */}
                   <div className="flex items-start justify-between">
-                    <h3 className="font-semibold text-foreground line-clamp-2">{study.title}</h3>
+                    <h3 className="font-semibold text-foreground line-clamp-2">{study.project_name}</h3>
                     <Badge className={getStatusColor(study.status)}>
-                      {study.status.replace('-', ' ')}
+                      {study.status}
                     </Badge>
                   </div>
 
                   {/* Summary */}
                   <p className="text-sm text-muted-foreground line-clamp-3">
-                    {study.summary}
+                    {study.executive_summary || 'Case study analysis in progress...'}
                   </p>
 
                   {/* Metadata */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Calendar className="w-3 h-3" />
-                      <span>{study.dateRange.start} - {study.dateRange.end}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Users className="w-3 h-3" />
-                      <span>{study.participants.length} participants</span>
+                      <FileText className="w-3 h-3" />
+                      <span>{study.template_type} template</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Clock className="w-3 h-3" />
-                      <span>Created {new Date(study.dateCreated).toLocaleDateString()}</span>
+                      <span>Created {new Date(study.created_at).toLocaleDateString()}</span>
                     </div>
-                  </div>
-
-                  {/* Keywords */}
-                  <div className="flex flex-wrap gap-1">
-                    {study.keywords.slice(0, 3).map((keyword) => (
-                      <Badge key={keyword} variant="outline" className="text-xs">
-                        {keyword}
-                      </Badge>
-                    ))}
-                    {study.keywords.length > 3 && (
-                      <Badge variant="outline" className="text-xs">
-                        +{study.keywords.length - 3}
-                      </Badge>
+                    {study.status === 'generating' && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <div className="w-3 h-3 rounded-full bg-yellow-400 animate-pulse" />
+                        <span>{study.progress_percentage}% complete</span>
+                      </div>
                     )}
                   </div>
 
-                  {/* Rating */}
-                  {study.status === 'completed' && (
-                    <div className="flex items-center gap-1">
-                      {renderStars(study.rating)}
+                  {/* Key Insights Preview */}
+                  {study.key_insights && study.key_insights.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {study.key_insights.slice(0, 2).map((insight, index) => (
+                        <Badge key={index} variant="outline" className="text-xs">
+                          {insight.substring(0, 30)}...
+                        </Badge>
+                      ))}
+                      {study.key_insights.length > 2 && (
+                        <Badge variant="outline" className="text-xs">
+                          +{study.key_insights.length - 2} more
+                        </Badge>
+                      )}
                     </div>
                   )}
                 </div>

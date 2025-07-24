@@ -99,7 +99,7 @@ export function ChatPanel({
     const scopeMessage: Message = {
       id: Date.now().toString(),
       type: 'agent',
-      content: `Great! I've updated the project scope for "${scope.projectName}". I'm now ready to generate your case study with the defined parameters.`,
+      content: `Great! I've updated the project scope for "${scope.focus || 'your project'}". I'm now ready to generate your case study with the defined parameters.`,
       timestamp: new Date()
     }
     setMessages(prev => [...prev, scopeMessage])
@@ -123,14 +123,14 @@ export function ChatPanel({
     const agentMessage: Message = {
       id: (Date.now() + 1).toString(),
       type: 'agent',
-      content: `Starting case study generation for "${projectScope.projectName}"... I'll analyze your data and generate comprehensive insights.`,
+      content: `Starting case study generation for "${projectScope.focus || 'your project'}"... I'll analyze your data and generate comprehensive insights.`,
       timestamp: new Date()
     }
     setMessages(prev => [...prev, agentMessage])
 
     try {
       const request: CaseStudyGenerationRequest = {
-        project_name: projectScope.projectName,
+        project_name: projectScope.focus || "Case Study",
         project_industry: projectScope.industry || undefined,
         project_focus: projectScope.focus || undefined,
         date_range_start: new Date(projectScope.dateRange.start).toISOString(),
