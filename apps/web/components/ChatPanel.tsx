@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader, Send, Bot, User, Calendar, Users, Hash, FolderOpen, Settings, Eye, Play } from "lucide-react"
+import { Send, Bot, User, Calendar, Users, Hash, FolderOpen, Settings, Eye, Play, Database, PenTool, Brain, Zap } from "lucide-react"
 import { ProjectScope } from "@/components/ProjectScopingModal"
 import { EnhancedProjectScopingModal } from "@/components/EnhancedProjectScopingModal"
 import { caseStudyService, type CaseStudyGenerationRequest, type StreamChunk } from "@/services/caseStudyService"
@@ -91,7 +91,7 @@ export function ChatPanel({
     }
   }
 
-  const handleScopeSubmit = (scope: any) => {
+  const handleScopeSubmit = (scope: ProjectScope) => {
     onProjectScopeUpdate?.(scope)
     setScopingModalOpen(false)
     
@@ -178,20 +178,49 @@ export function ChatPanel({
   }
 
   const getAgentStatusIcon = () => {
-    switch (agentStatus.toLowerCase()) {
-      case 'analyzing':
-        return <Loader className="w-4 h-4 animate-spin" />
-      case 'writing':
-        return <div className="w-4 h-4 bg-blue-500 rounded-full animate-pulse-slow" />
-      case 'thinking':
-        return <div className="flex gap-1">
-          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-slow" style={{ animationDelay: '0ms' }} />
-          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-slow" style={{ animationDelay: '600ms' }} />
-          <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-slow" style={{ animationDelay: '1200ms' }} />
+    const status = agentStatus.toLowerCase()
+    
+    // Handle various analyzing/data processing states
+    if (status.includes('analyzing') || status.includes('fetching') || status.includes('processing') || status.includes('connecting')) {
+      return (
+        <div className="relative">
+          <Database className="w-4 h-4 text-blue-500 animate-data-analyze" />
+          <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-400 rounded-full animate-data-pulse" />
         </div>
-      default:
-        return <div className="w-4 h-4 bg-green-500 rounded-full" />
+      )
     }
+    
+    // Handle writing states
+    if (status.includes('writing') || status.includes('generating')) {
+      return (
+        <div className="flex items-center gap-1">
+          <PenTool className="w-4 h-4 text-blue-500 animate-writing-flow" />
+          <div className="flex gap-0.5">
+            <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+            <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+            <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+        </div>
+      )
+    }
+    
+    // Handle thinking/planning states
+    if (status.includes('thinking') || status.includes('planning') || status.includes('insights')) {
+      return <Brain className="w-4 h-4 text-blue-500 animate-thinking-glow" />
+    }
+    
+    // Handle starting/initiating states
+    if (status.includes('starting') || status.includes('initiating')) {
+      return <Zap className="w-4 h-4 text-yellow-500 animate-pulse" />
+    }
+    
+    // Ready state (default)
+    if (status.includes('ready')) {
+      return <div className="w-4 h-4 bg-green-500 rounded-full" />
+    }
+    
+    // Fallback for other states
+    return <div className="w-4 h-4 bg-gray-400 rounded-full animate-pulse" />
   }
 
   const formatDate = (date: string) => {
@@ -367,9 +396,11 @@ export function ChatPanel({
 
       {/* Agent Status & Input */}
       <div className="p-4 border-t border-border">
-        <div className="flex items-center gap-3 text-muted-foreground mb-4">
-          {getAgentStatusIcon()}
-          <span className="text-sm">
+        <div className="flex items-center gap-3 text-muted-foreground mb-4 transition-all duration-300 ease-in-out">
+          <div className="transition-all duration-200 ease-in-out">
+            {getAgentStatusIcon()}
+          </div>
+          <span className="text-sm transition-opacity duration-200 ease-in-out">
             Agent is {agentStatus.toLowerCase()}...
           </span>
         </div>

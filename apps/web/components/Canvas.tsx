@@ -15,6 +15,8 @@ interface CanvasProps {
   onContentChange?: (content: string) => void
   onSave?: (content: string) => void
   title?: string
+  streamingContent?: string
+  isStreaming?: boolean
 }
 
 export function Canvas({ 
@@ -22,16 +24,34 @@ export function Canvas({
   isGenerating = false, 
   onContentChange, 
   onSave,
-  title = "Case Study Analysis"
+  title = "Case Study Analysis",
+  streamingContent = "",
+  isStreaming = false
 }: CanvasProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [markdownContent, setMarkdownContent] = useState(content)
   const [rating, setRating] = useState(0)
   const [hoverRating, setHoverRating] = useState(0)
 
+  // Initialize content from props
   useEffect(() => {
     setMarkdownContent(content)
   }, [content])
+
+  // Handle streaming content updates
+  useEffect(() => {
+    if (isStreaming && streamingContent) {
+      setMarkdownContent(streamingContent)
+    }
+  }, [streamingContent, isStreaming])
+
+  // Preserve streaming content when streaming stops
+  useEffect(() => {
+    if (!isStreaming && streamingContent) {
+      setMarkdownContent(streamingContent)
+      onContentChange?.(streamingContent)
+    }
+  }, [isStreaming, streamingContent])
 
   const handleSave = () => {
     setIsEditing(false)
@@ -63,7 +83,8 @@ export function Canvas({
           <div>
             <h2 className="text-xl font-semibold text-foreground">{title}</h2>
             <p className="text-sm text-muted-foreground">
-              {isGenerating ? "AI is generating your case study..." : "Generated case study"}
+              {isStreaming ? "AI is writing your case study..." : 
+               isGenerating ? "AI is generating your case study..." : "Generated case study"}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -126,7 +147,29 @@ export function Canvas({
         ) : (
           <div className="h-full overflow-y-auto">
             <div className="p-6">
-              {isGenerating ? (
+              {isStreaming ? (
+                <div className="space-y-4">
+                  {/* Real-time streaming content */}
+                  {markdownContent ? (
+                    <div className="markdown-content streaming">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {markdownContent}
+                      </ReactMarkdown>
+                      {/* Typing cursor animation */}
+                      <span className="inline-block w-0.5 h-4 bg-blue-500 animate-pulse ml-1"></span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3 text-muted-foreground">
+                      <div className="flex gap-1">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <span className="text-sm">AI is analyzing your data and starting to write...</span>
+                    </div>
+                  )}
+                </div>
+              ) : isGenerating ? (
                 <div className="space-y-4">
                   <div className="animate-pulse-slow">
                     <div className="h-8 bg-muted rounded w-3/4 mb-4"></div>
@@ -167,7 +210,7 @@ export function Canvas({
       </div>
 
       {/* Footer - Rating Section */}
-      {!isGenerating && markdownContent && (
+      {!isGenerating && !isStreaming && markdownContent && (
         <div className="p-6 border-t border-border">
           <Card className="p-4">
             <div className="flex items-center justify-between">

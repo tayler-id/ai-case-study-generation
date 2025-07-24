@@ -34,6 +34,8 @@ interface MainContentProps {
   onGenerationComplete?: () => void
   onContentChange?: (content: string) => void
   onSaveStudy?: (content: string) => void
+  streamingContent?: string
+  isStreaming?: boolean
 }
 
 export function MainContent({ 
@@ -47,7 +49,9 @@ export function MainContent({
   onStreamChunk,
   onGenerationComplete,
   onContentChange,
-  onSaveStudy
+  onSaveStudy,
+  streamingContent = "",
+  isStreaming = false
 }: MainContentProps) {
   return (
     <div className="flex-1 flex flex-col">
@@ -72,6 +76,8 @@ export function MainContent({
             onContentChange={onContentChange}
             onSave={onSaveStudy}
             title={currentStudy?.title || "Case Study Analysis"}
+            streamingContent={streamingContent}
+            isStreaming={isStreaming}
           />
         </ResizablePanel>
       </ResizablePanelGroup>

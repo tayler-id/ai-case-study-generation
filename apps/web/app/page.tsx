@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Authentication } from "@/components/Authentication"
 import { Sidebar } from "@/components/Sidebar"
 import { MainContent } from "@/components/MainContent"
@@ -8,7 +8,7 @@ import { Dashboard } from "@/components/Dashboard"
 import { ProjectScope } from "@/components/ProjectScopingModal"
 import { useAuthStore } from "@/stores/useAuthStore"
 import { User } from "@case-study/shared"
-import { type StreamChunk } from "@/services/caseStudyService"
+import { type StreamChunk, caseStudyService } from "@/services/caseStudyService"
 
 interface CaseStudy {
   id: string
@@ -34,6 +34,7 @@ export default function HomePage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [agentStatus, setAgentStatus] = useState("Ready")
   const [streamedContent, setStreamedContent] = useState("")
+  const [isStreaming, setIsStreaming] = useState(false)
 
   const handleAuthenticated = (authenticatedUser: User) => {
     // This is now handled by the auth store
@@ -82,11 +83,37 @@ export default function HomePage() {
     }, 1000)
   }
 
-  const handleSelectStudy = (study: CaseStudy) => {
-    setCurrentStudy(study)
-    setCurrentView('study')
-    setIsGenerating(false)
-    setAgentStatus("Ready")
+  const handleSelectStudy = async (study: { id: number }) => {
+    try {
+      // Fetch the full case study content from the API
+      const fullStudy = await caseStudyService.getCaseStudy(study.id)
+      
+      // Convert backend response to frontend format
+      const convertedStudy: CaseStudy = {
+        id: fullStudy.id.toString(),
+        title: fullStudy.project_name,
+        dateCreated: new Date(fullStudy.created_at).toISOString().split('T')[0],
+        dateRange: {
+          start: "2024-01-01", // Default values - these aren't stored in backend currently
+          end: "2024-01-31"
+        },
+        participants: [], // Default - not stored in backend currently
+        keywords: [], // Default - not stored in backend currently
+        rating: 0,
+        status: fullStudy.status === 'completed' ? 'completed' as const : 
+               fullStudy.status === 'generating' ? 'in-progress' as const : 'draft' as const,
+        summary: fullStudy.executive_summary || `Analysis of ${fullStudy.project_name}`,
+        content: fullStudy.full_content || ""
+      }
+      
+      setCurrentStudy(convertedStudy)
+      setCurrentView('study')
+      setIsGenerating(false)
+      setAgentStatus("Ready")
+    } catch (error) {
+      console.error('Failed to load case study:', error)
+      // Handle error - maybe show a toast notification
+    }
   }
 
   const handleSendMessage = (message: string) => {
@@ -105,6 +132,7 @@ export default function HomePage() {
 
   const handleStartGeneration = () => {
     setIsGenerating(true)
+    setIsStreaming(false)
     setAgentStatus("Starting generation")
     setStreamedContent("")
     
@@ -112,14 +140,14 @@ export default function HomePage() {
     if (projectScope) {
       setCurrentStudy({
         id: Date.now().toString(),
-        title: projectScope.projectName,
+        title: projectScope.projectName || projectScope.focus || "New Case Study",
         dateCreated: new Date().toISOString().split('T')[0],
         dateRange: projectScope.dateRange,
         participants: projectScope.participants,
         keywords: projectScope.keywords,
         rating: 0,
         status: 'in-progress',
-        summary: `Analysis of ${projectScope.projectName} from ${projectScope.dateRange.start} to ${projectScope.dateRange.end}`,
+        summary: `Analysis of ${projectScope.projectName || projectScope.focus || 'project'} from ${projectScope.dateRange.start} to ${projectScope.dateRange.end}`,
         content: ""
       })
     }
@@ -128,30 +156,29 @@ export default function HomePage() {
   const handleStreamChunk = (chunk: StreamChunk) => {
     if (chunk.type === 'content') {
       setStreamedContent(prev => prev + chunk.content)
+      setIsStreaming(true)
       setAgentStatus("Writing case study")
     } else if (chunk.type === 'section_start' && chunk.section) {
       setAgentStatus(`Writing: ${chunk.section}`)
     } else if (chunk.type === 'section_end') {
       setAgentStatus("Generating insights")
-    }
-    
-    // Update current study content in real-time
-    if (chunk.type === 'content') {
-      setCurrentStudy(prev => prev ? {
-        ...prev,
-        content: (prev.content || "") + chunk.content,
-        status: 'in-progress' as const
-      } : null)
+    } else if (chunk.type === 'metadata') {
+      // Handle metadata chunks that might indicate data processing
+      if (chunk.content.includes('Processing') || chunk.content.includes('emails')) {
+        setAgentStatus("Analyzing project data")
+      }
     }
   }
 
   const handleGenerationComplete = () => {
     setIsGenerating(false)
+    setIsStreaming(false)
     setAgentStatus("Ready")
     
-    // Mark current study as completed
+    // Mark current study as completed and set final content
     setCurrentStudy(prev => prev ? {
       ...prev, 
+      content: streamedContent,
       status: 'completed' as const
     } : null)
   }
@@ -201,7 +228,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-100 dark:bg-slate-900">
+    <div className="flex min-h-screen h-screen bg-slate-100 dark:bg-slate-900">
       <Sidebar 
         onCreateNewStudy={handleCreateNewStudy}
         currentView={currentView}
@@ -227,6 +254,8 @@ export default function HomePage() {
           onGenerationComplete={handleGenerationComplete}
           onContentChange={handleContentChange}
           onSaveStudy={handleSaveStudy}
+          streamingContent={streamedContent}
+          isStreaming={isStreaming}
         />
       )}
     </div>

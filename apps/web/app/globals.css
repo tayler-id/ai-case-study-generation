@@ -51,6 +51,12 @@
   border-color: hsl(var(--border));
 }
 
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
@@ -93,6 +99,62 @@ body {
   }
 }
 
+@keyframes data-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+@keyframes data-analyze {
+  0% {
+    transform: rotate(0deg) scale(1);
+    opacity: 0.6;
+  }
+  25% {
+    transform: rotate(90deg) scale(1.1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: rotate(180deg) scale(1);
+    opacity: 1;
+  }
+  75% {
+    transform: rotate(270deg) scale(1.1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    opacity: 0.6;
+  }
+}
+
+@keyframes writing-flow {
+  0%, 100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(2px);
+    opacity: 0.7;
+  }
+}
+
+@keyframes thinking-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(59, 130, 246, 0.3);
+    opacity: 0.7;
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+    opacity: 1;
+  }
+}
+
 .animate-pulse-slow {
   animation: pulse-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
@@ -107,6 +169,46 @@ body {
 
 .animate-bounce-slow {
   animation: bounce-slow 3s infinite;
+}
+
+.animate-data-pulse {
+  animation: data-pulse 2s ease-in-out infinite;
+}
+
+.animate-data-analyze {
+  animation: data-analyze 3s ease-in-out infinite;
+}
+
+.animate-writing-flow {
+  animation: writing-flow 1.5s ease-in-out infinite;
+}
+
+.animate-thinking-glow {
+  animation: thinking-glow 2.5s ease-in-out infinite;
+}
+
+/* Accessibility: Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .animate-data-pulse,
+  .animate-data-analyze,
+  .animate-writing-flow,
+  .animate-thinking-glow,
+  .animate-bounce-slow,
+  .animate-pulse-slow,
+  .animate-spin-slow {
+    animation: none;
+  }
+  
+  /* Provide subtle alternative for reduced motion */
+  .animate-data-pulse,
+  .animate-data-analyze,
+  .animate-thinking-glow {
+    opacity: 0.8;
+  }
+  
+  .animate-writing-flow {
+    opacity: 0.9;
+  }
 }
 
 /* Markdown styling */

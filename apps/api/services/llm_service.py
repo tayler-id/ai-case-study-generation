@@ -100,10 +100,11 @@ class LLMService:
         # OpenAI models
         if self.settings.OPENAI_API_KEY:
             models["gpt-4"] = ChatOpenAI(
-                model="gpt-4-1106-preview",
+                model="gpt-4o-mini",
                 api_key=self.settings.OPENAI_API_KEY,
                 streaming=True,
-                temperature=0.3
+                temperature=0.3,
+                max_tokens=16384
             )
             models["gpt-3.5-turbo"] = ChatOpenAI(
                 model="gpt-3.5-turbo-1106",
@@ -274,6 +275,10 @@ class LLMService:
         You are an expert business analyst, researcher, and case study writer specializing in deep data analysis. 
         Your task is to conduct thorough research on project data from emails and documents to create comprehensive, 
         professional case studies that rival Harvard Business School quality.
+        
+        IMPORTANT: Generate a detailed, comprehensive case study of at least 10,000-15,000 words. Be thorough, 
+        analytical, and provide extensive detail in each section. Include specific examples, quotes, and detailed 
+        analysis throughout.
         
         ## DEEP RESEARCH METHODOLOGY:
         - Analyze ALL provided emails and documents thoroughly
