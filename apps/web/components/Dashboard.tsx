@@ -5,9 +5,11 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Search, Calendar, Users, FileText, Clock, AlertCircle } from "lucide-react"
+import { Search, Calendar, Users, FileText, Clock, AlertCircle, MoreVertical, Trash2 } from "lucide-react"
 import { ConnectionStatus } from "@/components/ConnectionStatus"
 import { caseStudyService, CaseStudyResponse } from "@/services/caseStudyService"
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
+import * as AlertDialog from "@radix-ui/react-alert-dialog"
 
 interface DashboardProps {
   onSelectStudy: (study: CaseStudyResponse) => void
@@ -19,6 +21,9 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
   const [studies, setStudies] = useState<CaseStudyResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [studyToDelete, setStudyToDelete] = useState<CaseStudyResponse | null>(null)
 
   // Fetch case studies from API
   useEffect(() => {
@@ -37,6 +42,33 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
 
     fetchStudies()
   }, [])
+
+  const handleDeleteClick = (study: CaseStudyResponse, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setStudyToDelete(study)
+    setDeleteConfirmOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!studyToDelete) return
+    
+    try {
+      setDeletingId(studyToDelete.id)
+      await caseStudyService.deleteCaseStudy(studyToDelete.id)
+      setStudies(prev => prev.filter(s => s.id !== studyToDelete.id))
+      setDeleteConfirmOpen(false)
+      setStudyToDelete(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete case study')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const handleDeleteCancel = () => {
+    setDeleteConfirmOpen(false)
+    setStudyToDelete(null)
+  }
 
   const filteredStudies = studies.filter(study => {
     const matchesSearch = study.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -139,16 +171,45 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
             {filteredStudies.map((study) => (
               <Card
                 key={study.id}
-                className="p-6 cursor-pointer hover:shadow-md transition-shadow"
+                className="p-6 cursor-pointer hover:shadow-md transition-shadow relative"
                 onClick={() => onSelectStudy(study)}
               >
                 <div className="space-y-4">
                   {/* Header */}
                   <div className="flex items-start justify-between">
                     <h3 className="font-semibold text-foreground line-clamp-2">{study.project_name}</h3>
-                    <Badge className={getStatusColor(study.status)}>
-                      {study.status}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge className={getStatusColor(study.status)}>
+                        {study.status}
+                      </Badge>
+                      <DropdownMenu.Root>
+                        <DropdownMenu.Trigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 hover:bg-muted"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                          <DropdownMenu.Content
+                            className="min-w-[160px] bg-background border border-border rounded-md p-1 shadow-lg z-50"
+                            align="end"
+                          >
+                            <DropdownMenu.Item
+                              className="flex items-center gap-2 px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 hover:text-red-700 rounded cursor-pointer outline-none"
+                              onClick={(e) => handleDeleteClick(study, e)}
+                              disabled={deletingId === study.id}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              {deletingId === study.id ? 'Deleting...' : 'Delete'}
+                            </DropdownMenu.Item>
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                      </DropdownMenu.Root>
+                    </div>
                   </div>
 
                   {/* Summary */}
@@ -195,6 +256,37 @@ export function Dashboard({ onSelectStudy }: DashboardProps) {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog.Root open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className="fixed inset-0 bg-black/50 z-50" />
+          <AlertDialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-background border border-border rounded-lg p-6 shadow-lg z-50">
+            <AlertDialog.Title className="text-lg font-semibold text-foreground mb-2">
+              Delete Case Study
+            </AlertDialog.Title>
+            <AlertDialog.Description className="text-muted-foreground mb-4">
+              Are you sure you want to delete "{studyToDelete?.project_name}"? This action cannot be undone and will permanently remove the case study and all associated data.
+            </AlertDialog.Description>
+            <div className="flex justify-end gap-2">
+              <AlertDialog.Cancel asChild>
+                <Button variant="outline" onClick={handleDeleteCancel}>
+                  Cancel
+                </Button>
+              </AlertDialog.Cancel>
+              <AlertDialog.Action asChild>
+                <Button 
+                  variant="destructive" 
+                  onClick={handleDeleteConfirm}
+                  disabled={deletingId !== null}
+                >
+                  {deletingId ? 'Deleting...' : 'Delete'}
+                </Button>
+              </AlertDialog.Action>
+            </div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
     </div>
   )
 }
